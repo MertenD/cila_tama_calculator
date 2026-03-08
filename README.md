@@ -67,14 +67,23 @@ sources/nrrd/Sarkome_Phyton/YYYY-MM-DD/
 │   └── Befundverlauf 1/
 │       └── 0/
 │           ├── Baseline/
-│           │   ├── *org*.nrrd (CT scan)
-│           │   ├── *Musc*.nrrd (muscle segmentation)
-│           │   └── *Visc*.nrrd (visceral organ segmentation)
+│           │   └── nrrd/
+│           │       ├── [DICOM_UID]/
+│           │       │   └── *.dcm (CT scan DICOM files)
+│           │       ├── *_F08 Musc_*.nrrd (muscle segmentation)
+│           │       └── *_F07 Visc_*.nrrd (visceral organ segmentation)
 │           ├── Follow-Up 1/
+│           │   └── nrrd/
+│           │       ├── [DICOM_UID]/
+│           │       ├── *_Musc_*.nrrd
+│           │       └── *_Visc_*.nrrd
 │           └── Follow-Up 2/
+│               └── nrrd/
 └── PatientID_2/
     └── ...
 ```
+
+**Note:** The DICOM CT scans are stored in a subdirectory named with the DICOM Series UID (e.g., `1.3.12.2.1107.5.1.4.11040...`), while the NRRD segmentation files are stored directly in the `nrrd/` folder.
 
 ## Output
 
