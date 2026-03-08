@@ -1,0 +1,129 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build Windows executable
+        run: |
+          pyinstaller --clean TAMA_Calculator.spec
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TAMA_Calculator-Windows
+          path: dist/TAMA_Calculator.exe
+          retention-days: 1
+
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip3 install -r requirements.txt
+
+      - name: Build macOS executable
+        run: |
+          pyinstaller --clean TAMA_Calculator.spec
+
+      - name: Create macOS ZIP
+        run: |
+          cd dist
+          zip -r TAMA_Calculator-macOS.zip TAMA_Calculator.app
+          cd ..
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TAMA_Calculator-macOS
+          path: dist/TAMA_Calculator-macOS.zip
+          retention-days: 1
+
+  create-release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: TAMA_Calculator-Windows
+          path: ./artifacts/windows
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: TAMA_Calculator-macOS
+          path: ./artifacts/macos
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(cat version.txt | tr -d '[:space:]')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Release Version: $VERSION"
+
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Release v${{ steps.version.outputs.version }}
+          body: |
+            Automatic release v${{ steps.version.outputs.version }} from ${{ steps.date.outputs.date }}
+            
+            ## Downloads
+            - **Windows**: TAMA_Calculator.exe
+            - **macOS**: TAMA_Calculator-macOS.zip (extract and run TAMA_Calculator.app)
+            
+            ## Changes
+            Commit: ${{ github.sha }}
+          draft: false
+          prerelease: false
+          files: |
+            ./artifacts/windows/TAMA_Calculator.exe
+            ./artifacts/macos/TAMA_Calculator-macOS.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+
+
+

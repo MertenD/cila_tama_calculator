@@ -1,0 +1,96 @@
+name: Check Version Update
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Get PR version
+        id: pr-version
+        run: |
+          if [ -f version.txt ]; then
+            PR_VERSION=$(cat version.txt | tr -d '[:space:]')
+            echo "version=$PR_VERSION" >> $GITHUB_OUTPUT
+            echo "PR Version: $PR_VERSION"
+          else
+            echo "::error::version.txt not found!"
+            exit 1
+          fi
+
+      - name: Checkout main branch
+        run: |
+          git fetch origin main
+          git checkout origin/main
+
+      - name: Get main version
+        id: main-version
+        run: |
+          if [ -f version.txt ]; then
+            MAIN_VERSION=$(cat version.txt | tr -d '[:space:]')
+            echo "version=$MAIN_VERSION" >> $GITHUB_OUTPUT
+            echo "Main Version: $MAIN_VERSION"
+          else
+            echo "version=0.0.0" >> $GITHUB_OUTPUT
+            echo "Main Version: 0.0.0 (no version.txt found)"
+          fi
+
+      - name: Compare versions
+        run: |
+          PR_VERSION="${{ steps.pr-version.outputs.version }}"
+          MAIN_VERSION="${{ steps.main-version.outputs.version }}"
+          
+          echo "Comparing versions:"
+          echo "  Main: $MAIN_VERSION"
+          echo "  PR:   $PR_VERSION"
+          
+          verlte() {
+              printf '%s\n%s' "$1" "$2" | sort -C -V
+          }
+          
+          verlt() {
+              ! verlte "$2" "$1"
+          }
+          
+          if [ "$PR_VERSION" == "$MAIN_VERSION" ]; then
+            echo "::error::❌ Version was not bumped!"
+            echo "::error::Current version on main: $MAIN_VERSION"
+            echo "::error::Version in PR: $PR_VERSION"
+            echo "::error::Please increase the version in version.txt"
+            exit 1
+          elif verlt "$PR_VERSION" "$MAIN_VERSION"; then
+            echo "::error::❌ Version in PR ($PR_VERSION) is lower than on main ($MAIN_VERSION)!"
+            echo "::error::Please increase the version in version.txt"
+            exit 1
+          else
+            echo "✅ Version correctly bumped from $MAIN_VERSION to $PR_VERSION"
+          fi
+
+      - name: Comment on PR
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '❌ **Version Check Failed!**\n\n' +
+                    'The version in `version.txt` must be increased before this PR can be merged.\n\n' +
+                    '**Current version on main:** `${{ steps.main-version.outputs.version }}`\n' +
+                    '**Version in this PR:** `${{ steps.pr-version.outputs.version }}`\n\n' +
+                    'Please increase the version in `version.txt` (e.g., from 1.0.0 to 1.0.1 or 1.1.0).'
+            })
+
+
