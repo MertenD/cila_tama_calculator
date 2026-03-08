@@ -1,0 +1,5 @@
+dist
+build
+.venv
+sources
+/tama_areas.csv

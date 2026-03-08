@@ -1,0 +1,5 @@
+SimpleITK
+numpy
+Flask
+flask-cors
+pyinstaller

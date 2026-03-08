@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TAMA Berechnungs-Tool</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .section {
+            margin-bottom: 30px;
+            display: none;
+        }
+
+        .section.active {
+            display: block;
+        }
+
+        .section-title {
+            font-size: 1.8em;
+            color: #333;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #667eea;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        .input-group label {
+            display: block;
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 8px;
+            font-size: 1.1em;
+        }
+
+        .input-group input[type="text"] {
+            width: 100%;
+            padding: 15px;
+            font-size: 1em;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            transition: border-color 0.3s;
+        }
+
+        .input-group input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .input-group input[type="file"] {
+            width: 100%;
+            padding: 12px;
+            font-size: 1em;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+            transition: border-color 0.3s;
+        }
+
+        .input-group input[type="file"]:hover {
+            border-color: #667eea;
+        }
+
+        .btn {
+            padding: 15px 30px;
+            font-size: 1.1em;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-right: 10px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+        .progress-container {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 30px;
+            background: #e9ecef;
+            border-radius: 15px;
+            overflow: hidden;
+            margin-bottom: 15px;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+        }
+
+        .log-container {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            border-radius: 8px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 5px;
+            border-left: 3px solid transparent;
+        }
+
+        .log-entry.info {
+            border-left-color: #007bff;
+        }
+
+        .log-entry.success {
+            border-left-color: #28a745;
+        }
+
+        .log-entry.warning {
+            border-left-color: #ffc107;
+            color: #ffc107;
+        }
+
+        .log-entry.error {
+            border-left-color: #dc3545;
+            color: #dc3545;
+        }
+
+        .results-container {
+            margin-top: 30px;
+        }
+
+        .patient-selector {
+            margin-bottom: 30px;
+        }
+
+        .patient-selector select {
+            width: 100%;
+            padding: 15px;
+            font-size: 1.1em;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+        }
+
+        .chart-container {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 30px;
+            margin-top: 20px;
+        }
+
+        .chart-wrapper {
+            position: relative;
+            height: 500px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        .stat-card .value {
+            font-size: 2em;
+            font-weight: 700;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .stat-card .label {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .alert {
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .alert-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔬 TAMA Berechnungs-Tool</h1>
+            <p>Total Abdominal Muscle Area Analyse</p>
+        </div>
+
+        <div class="content">
+            <!-- Schritt 1: Ordner auswählen -->
+            <div class="section active" id="step-select">
+                <h2 class="section-title">📁 Schritt 1: Datenquelle auswählen</h2>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 20px;">
+                    <!-- Option 1: Ordner auswählen -->
+                    <div style="background: #f8f9fa; padding: 25px; border-radius: 12px; border: 2px solid #dee2e6;">
+                        <h3 style="margin-bottom: 15px; color: #333;">🔬 Neue Berechnung</h3>
+                        <p style="color: #666; margin-bottom: 20px; font-size: 0.95em;">
+                            Geben Sie den Pfad zum Ordner mit Patientendaten ein
+                        </p>
+
+                        <div class="input-group">
+                            <label for="rootPath">Ordnerpfad:</label>
+                            <input type="text"
+                                   id="rootPath"
+                                   placeholder="z.B. C:\Users\...\sources\nrrd\Sarkome_Phyton\2025-12-10"
+                                   value="sources/nrrd/Sarkome_Phyton/2025-12-10"
+                                   style="margin-bottom: 10px;">
+                            <small style="color: #666; display: block; margin-top: -5px; margin-bottom: 10px;">
+                                💡 Tipp: Kopieren Sie den Pfad aus dem Windows Explorer (Adressleiste)
+                            </small>
+                        </div>
+
+                        <div style="background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #dee2e6;">
+                            <label style="font-weight: 600; color: #555; margin-bottom: 10px; display: block;">
+                                🔬 Hounsfield-Einheiten (HU) für Muskelgewebe:
+                            </label>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                                <div>
+                                    <label for="huMin" style="font-size: 0.9em; color: #666; display: block; margin-bottom: 5px;">
+                                        Minimum:
+                                    </label>
+                                    <input type="number"
+                                           id="huMin"
+                                           value="-29"
+                                           step="1"
+                                           style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 6px; font-size: 1em;">
+                                </div>
+                                <div>
+                                    <label for="huMax" style="font-size: 0.9em; color: #666; display: block; margin-bottom: 5px;">
+                                        Maximum:
+                                    </label>
+                                    <input type="number"
+                                           id="huMax"
+                                           value="150"
+                                           step="1"
+                                           style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 6px; font-size: 1em;">
+                                </div>
+                            </div>
+                            <small style="color: #666; display: block; margin-top: 8px; font-size: 0.85em;">
+                                ℹ️ Diese Werte definieren den Dichtebereich von Muskelgewebe in CT-Bildern. Standard: -29 bis 150 HU
+                            </small>
+                        </div>
+
+                        <button class="btn btn-secondary" onclick="openExplorerTip()" style="width: 100%; margin-bottom: 10px;">
+                            📂 Wie finde ich den Pfad?
+                        </button>
+
+                        <div id="pathError" class="alert alert-error hidden" style="margin-top: 15px;"></div>
+
+                        <button class="btn btn-primary"
+                                id="startCalcBtn"
+                                onclick="validateAndStart()"
+                                style="width: 100%; margin-top: 15px;">
+                            ▶️ Berechnung starten
+                        </button>
+                    </div>
+
+                    <!-- Option 2: CSV hochladen -->
+                    <div style="background: #f8f9fa; padding: 25px; border-radius: 12px; border: 2px solid #dee2e6;">
+                        <h3 style="margin-bottom: 15px; color: #333;">📊 CSV-Datei laden</h3>
+                        <p style="color: #666; margin-bottom: 20px; font-size: 0.95em;">
+                            Laden Sie eine vorhandene CSV-Datei mit TAMA-Ergebnissen zur Visualisierung
+                        </p>
+
+                        <div class="input-group">
+                            <label for="csvFile">CSV-Datei auswählen:</label>
+                            <input type="file"
+                                   id="csvFile"
+                                   accept=".csv"
+                                   style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px; background: white; cursor: pointer;">
+                        </div>
+
+                        <div id="csvError" class="alert alert-error hidden" style="margin-top: 15px;"></div>
+
+                        <button class="btn btn-success" onclick="uploadCSV()" style="width: 100%; margin-top: 15px;">
+                            📤 CSV hochladen & anzeigen
+                        </button>
+                    </div>
+                </div>
+
+                <div class="alert alert-info">
+                    <strong>💡 Tipp:</strong> Sie können entweder eine neue Berechnung starten oder eine vorhandene CSV-Datei zur Visualisierung hochladen.
+                </div>
+            </div>
+
+            <!-- Schritt 2: Berechnung läuft -->
+            <div class="section" id="step-calculation">
+                <h2 class="section-title">⚙️ Schritt 2: Berechnung läuft...</h2>
+
+                <div class="progress-container">
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" id="progressBar" style="width: 0%">0%</div>
+                    </div>
+
+                    <div style="text-align: center; margin-bottom: 15px;">
+                        <strong id="progressText">Initialisiere...</strong>
+                    </div>
+
+                    <div class="log-container" id="logContainer">
+                        <div class="log-entry info">Warte auf Start...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Schritt 3: Ergebnisse anzeigen -->
+            <div class="section" id="step-results">
+                <h2 class="section-title">📊 Schritt 3: Ergebnisse</h2>
+
+                <div class="alert alert-success">
+                    <strong>✅ Berechnung erfolgreich abgeschlossen!</strong>
+                </div>
+
+                <div class="stats-grid" id="statsGrid">
+                    <!-- Wird dynamisch gefüllt -->
+                </div>
+
+                <div class="patient-selector">
+                    <label for="patientSelect" style="font-weight: 600; font-size: 1.1em; display: block; margin-bottom: 10px;">
+                        Patient auswählen:
+                    </label>
+                    <select id="patientSelect" onchange="updateChart()">
+                        <option value="">-- Bitte Patient auswählen --</option>
+                    </select>
+                </div>
+
+                <div class="chart-container">
+                    <h3 style="margin-bottom: 20px; color: #333;">TAMA-Verlauf über Zeit</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="tamaChart"></canvas>
+                    </div>
+                </div>
+
+                <div style="margin-top: 30px;">
+                    <button class="btn btn-success" onclick="downloadCSV()">
+                        💾 CSV herunterladen
+                    </button>
+                    <button class="btn btn-secondary" onclick="resetApp()">
+                        🔄 Neue Berechnung
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        let allResults = null;
+        let patientData = null;
+        let chart = null;
+
+        function showSection(sectionId) {
+            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+            document.getElementById(sectionId).classList.add('active');
+        }
+
+        function openExplorerTip() {
+            alert(
+                '📂 So finden Sie den Ordnerpfad:\n\n' +
+                '1. Öffnen Sie den Windows Explorer\n' +
+                '2. Navigieren Sie zum gewünschten Ordner\n' +
+                '3. Klicken Sie in die Adressleiste oben\n' +
+                '4. Der komplette Pfad wird markiert\n' +
+                '5. Kopieren Sie den Pfad (Strg+C)\n' +
+                '6. Fügen Sie ihn ins Textfeld ein (Strg+V)\n\n' +
+                'Beispiel:\n' +
+                'C:\\Users\\IhrName\\Dokumente\\sources\\nrrd\\Sarkome_Phyton\\2025-12-10'
+            );
+        }
+
+        async function validateAndStart() {
+            const path = document.getElementById('rootPath').value.trim();
+            const huMin = parseFloat(document.getElementById('huMin').value);
+            const huMax = parseFloat(document.getElementById('huMax').value);
+            const errorDiv = document.getElementById('pathError');
+
+            if (!path) {
+                errorDiv.textContent = '❌ Bitte geben Sie einen Pfad ein.';
+                errorDiv.classList.remove('alert-info');
+                errorDiv.classList.add('alert-error');
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+
+            // Validiere HU-Werte
+            if (isNaN(huMin) || isNaN(huMax)) {
+                errorDiv.textContent = '❌ Bitte geben Sie gültige HU-Werte ein.';
+                errorDiv.classList.remove('alert-info');
+                errorDiv.classList.add('alert-error');
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+
+            if (huMin >= huMax) {
+                errorDiv.textContent = '❌ HU Minimum muss kleiner als Maximum sein.';
+                errorDiv.classList.remove('alert-info');
+                errorDiv.classList.add('alert-error');
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+
+            errorDiv.classList.add('hidden');
+
+            // Validiere Pfad
+            try {
+                const response = await fetch('/api/select-folder', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({path: path})
+                });
+
+                const result = await response.json();
+
+                if (!result.success) {
+                    errorDiv.textContent = '❌ ' + result.error;
+                    errorDiv.classList.remove('alert-info');
+                    errorDiv.classList.add('alert-error');
+                    errorDiv.classList.remove('hidden');
+                    return;
+                }
+
+                // Starte Berechnung
+                startCalculation(path, huMin, huMax);
+
+            } catch (error) {
+                errorDiv.textContent = '❌ Fehler bei der Verbindung zum Server: ' + error.message;
+                errorDiv.classList.remove('alert-info');
+                errorDiv.classList.add('alert-error');
+                errorDiv.classList.remove('hidden');
+            }
+        }
+
+        async function uploadCSV() {
+            const fileInput = document.getElementById('csvFile');
+            const errorDiv = document.getElementById('csvError');
+
+            if (!fileInput.files || fileInput.files.length === 0) {
+                errorDiv.textContent = '❌ Bitte wählen Sie eine CSV-Datei aus';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+
+            const file = fileInput.files[0];
+
+            if (!file.name.endsWith('.csv')) {
+                errorDiv.textContent = '❌ Bitte wählen Sie eine gültige CSV-Datei';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+
+            errorDiv.classList.add('hidden');
+
+            // Zeige Ladeanimation
+            const uploadBtn = event.target;
+            const originalText = uploadBtn.textContent;
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = '⏳ Lade CSV...';
+
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+
+                const response = await fetch('/api/upload-csv', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (!result.success) {
+                    errorDiv.textContent = '❌ ' + result.error;
+                    errorDiv.classList.remove('hidden');
+                    uploadBtn.disabled = false;
+                    uploadBtn.textContent = originalText;
+                    return;
+                }
+
+                // Erfolgreich geladen
+                allResults = result.results;
+                patientData = result.patientData;
+
+                // Fülle Patienten-Dropdown
+                const select = document.getElementById('patientSelect');
+                select.innerHTML = '<option value="">-- Bitte Patient auswählen --</option>';
+
+                result.patients.forEach(patId => {
+                    const option = document.createElement('option');
+                    option.value = patId;
+                    option.textContent = `Patient ${patId}`;
+                    select.appendChild(option);
+                });
+
+                // Zeige Statistiken
+                updateStats(result);
+
+                // Zeige Ergebnisseite
+                showSection('step-results');
+
+            } catch (error) {
+                errorDiv.textContent = '❌ Fehler beim Hochladen: ' + error.message;
+                errorDiv.classList.remove('hidden');
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = originalText;
+            }
+        }
+
+        async function startCalculation(path, huMin, huMax) {
+            showSection('step-calculation');
+
+            try {
+                // Starte Berechnung
+                const response = await fetch('/api/start-calculation', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        path: path,
+                        huMin: huMin,
+                        huMax: huMax
+                    })
+                });
+
+                const result = await response.json();
+
+                if (!result.success) {
+                    addLogEntry('error', '❌ Fehler beim Start: ' + result.error);
+                    return;
+                }
+
+                // Zeige HU-Werte im Log
+                addLogEntry('info', `🔬 Verwende HU-Werte: ${huMin} bis ${huMax}`);
+
+                // Verbinde zu Progress Stream
+                const eventSource = new EventSource('/api/progress');
+
+                eventSource.onmessage = function(event) {
+                    const data = JSON.parse(event.data);
+
+                    if (data.type === 'heartbeat') {
+                        return;
+                    }
+
+                    if (data.type === 'progress') {
+                        updateProgress(data.progress, data.message);
+                        addLogEntry('info', data.message);
+                    } else if (data.type === 'success') {
+                        addLogEntry('success', data.message);
+                    } else if (data.type === 'warning') {
+                        addLogEntry('warning', data.message);
+                    } else if (data.type === 'error') {
+                        addLogEntry('error', data.message);
+                        eventSource.close();
+                    } else if (data.type === 'complete') {
+                        addLogEntry('success', data.message);
+                        updateProgress(100, 'Abgeschlossen!');
+                        eventSource.close();
+
+                        // Lade Ergebnisse
+                        setTimeout(loadResults, 1000);
+                    } else {
+                        addLogEntry('info', data.message);
+                    }
+                };
+
+                eventSource.onerror = function() {
+                    addLogEntry('error', '❌ Verbindung zum Server unterbrochen');
+                    eventSource.close();
+                };
+
+            } catch (error) {
+                addLogEntry('error', '❌ Fehler: ' + error.message);
+            }
+        }
+
+        function updateProgress(percent, text) {
+            const bar = document.getElementById('progressBar');
+            const textEl = document.getElementById('progressText');
+
+            bar.style.width = percent + '%';
+            bar.textContent = percent + '%';
+            textEl.textContent = text;
+        }
+
+        function addLogEntry(type, message) {
+            const container = document.getElementById('logContainer');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry ' + type;
+
+            const timestamp = new Date().toLocaleTimeString('de-DE');
+            entry.textContent = `[${timestamp}] ${message}`;
+
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        async function loadResults() {
+            try {
+                const response = await fetch('/api/results');
+                const data = await response.json();
+
+                if (!data.success) {
+                    addLogEntry('error', '❌ Fehler beim Laden der Ergebnisse');
+                    return;
+                }
+
+                allResults = data.results;
+                patientData = data.patientData;
+
+                // Fülle Patienten-Dropdown
+                const select = document.getElementById('patientSelect');
+                select.innerHTML = '<option value="">-- Bitte Patient auswählen --</option>';
+
+                data.patients.forEach(patId => {
+                    const option = document.createElement('option');
+                    option.value = patId;
+                    option.textContent = `Patient ${patId}`;
+                    select.appendChild(option);
+                });
+
+                // Zeige Statistiken
+                updateStats(data);
+
+                // Zeige Ergebnisseite
+                showSection('step-results');
+
+            } catch (error) {
+                addLogEntry('error', '❌ Fehler beim Laden: ' + error.message);
+            }
+        }
+
+        function updateStats(data) {
+            const statsGrid = document.getElementById('statsGrid');
+            const totalPatients = data.patients.length;
+            const totalTimepoints = data.results.length;
+            const avgTama = data.results.reduce((sum, r) => sum + r.tamaAreaVertSubtracted, 0) / totalTimepoints;
+
+            statsGrid.innerHTML = `
+                <div class="stat-card">
+                    <div class="value">${totalPatients}</div>
+                    <div class="label">Patienten</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value">${totalTimepoints}</div>
+                    <div class="label">Zeitpunkte</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value">${avgTama.toFixed(0)}</div>
+                    <div class="label">Ø TAMA (mm²)</div>
+                </div>
+            `;
+        }
+
+        function updateChart() {
+            const patientId = document.getElementById('patientSelect').value;
+
+            if (!patientId || !patientData[patientId]) {
+                if (chart) {
+                    chart.destroy();
+                    chart = null;
+                }
+                return;
+            }
+
+            const data = patientData[patientId];
+
+            // Sortiere nach Datum
+            data.sort((a, b) => {
+                if (a.date === 'Unknown') return 1;
+                if (b.date === 'Unknown') return -1;
+                return new Date(a.date) - new Date(b.date);
+            });
+
+            const labels = data.map(d => `${d.timepoint}\n${d.date}`);
+            const tamaWithVert = data.map(d => d.tamaAreaVertSubtracted);
+            const tamaWithoutVert = data.map(d => d.tamaAreaVertNotSubtracted);
+
+            const ctx = document.getElementById('tamaChart').getContext('2d');
+
+            if (chart) {
+                chart.destroy();
+            }
+
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'TAMA (mit Wirbelsäulen-Subtraktion)',
+                            data: tamaWithVert,
+                            borderColor: '#667eea',
+                            backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                            borderWidth: 3,
+                            pointRadius: 6,
+                            pointHoverRadius: 8,
+                            tension: 0.3
+                        },
+                        {
+                            label: 'TAMA (ohne Wirbelsäulen-Subtraktion)',
+                            data: tamaWithoutVert,
+                            borderColor: '#764ba2',
+                            backgroundColor: 'rgba(118, 75, 162, 0.1)',
+                            borderWidth: 3,
+                            pointRadius: 6,
+                            pointHoverRadius: 8,
+                            tension: 0.3
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                font: {
+                                    size: 14,
+                                    weight: 'bold'
+                                },
+                                padding: 15
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            padding: 12,
+                            titleFont: {
+                                size: 14,
+                                weight: 'bold'
+                            },
+                            bodyFont: {
+                                size: 13
+                            },
+                            callbacks: {
+                                label: function(context) {
+                                    return context.dataset.label + ': ' + context.parsed.y.toFixed(2) + ' mm²';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            title: {
+                                display: true,
+                                text: 'TAMA (mm²)',
+                                font: {
+                                    size: 14,
+                                    weight: 'bold'
+                                }
+                            },
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.05)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Zeitpunkt',
+                                font: {
+                                    size: 14,
+                                    weight: 'bold'
+                                }
+                            },
+                            grid: {
+                                display: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function downloadCSV() {
+            window.location.href = '/api/download-csv';
+        }
+
+        function resetApp() {
+            if (chart) {
+                chart.destroy();
+                chart = null;
+            }
+            allResults = null;
+            patientData = null;
+
+            document.getElementById('logContainer').innerHTML = '<div class="log-entry info">Warte auf Start...</div>';
+            document.getElementById('progressBar').style.width = '0%';
+            document.getElementById('progressBar').textContent = '0%';
+            document.getElementById('progressText').textContent = 'Initialisiere...';
+            document.getElementById('rootPath').value = 'sources/nrrd/Sarkome_Phyton/2025-12-10';
+            document.getElementById('huMin').value = '-29';
+            document.getElementById('huMax').value = '150';
+            document.getElementById('csvFile').value = '';
+            document.getElementById('pathError').classList.add('hidden');
+            document.getElementById('csvError').classList.add('hidden');
+
+            showSection('step-select');
+        }
+    </script>
+</body>
+</html>
