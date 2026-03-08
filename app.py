@@ -5,6 +5,8 @@ Diese Anwendung bietet eine Weboberfläche zum Auswählen von Patientendaten,
 Durchführen von TAMA-Berechnungen mit Fortschrittsanzeige und Visualisierung
 der Ergebnisse.
 """
+import sys
+import webbrowser
 
 from flask import Flask, render_template, request, jsonify, send_file
 from flask_cors import CORS
