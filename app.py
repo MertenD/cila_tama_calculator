@@ -7,6 +7,10 @@ der Ergebnisse.
 """
 import sys
 import webbrowser
+import multiprocessing
+
+from urllib.request import urlopen
+from urllib.error import URLError
 
 from flask import Flask, render_template, request, jsonify, send_file
 from flask_cors import CORS
@@ -29,6 +33,45 @@ CORS(app)
 progress_queue = queue.Queue()
 calculation_running = False
 calculation_results = []
+
+
+def _is_main_process() -> bool:
+    """True nur im echten Parent-Prozess.
+
+    Wichtig für Windows/PyInstaller: Child-Prozesse (ProcessPool, ggf. Werkzeug) sollen
+    keinen Browser öffnen und keinen Server starten.
+    """
+    try:
+        return multiprocessing.current_process().name == "MainProcess"
+    except Exception:
+        return True
+
+
+def _should_open_browser() -> bool:
+    """Steuert, ob wir den Browser automatisch öffnen."""
+    if os.environ.get("TAMA_NO_BROWSER", "").strip() in {"1", "true", "yes", "ja"}:
+        return False
+    # Falls Werkzeug-Reloader aktiv wäre, öffnet nur der "echte" Run.
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        return False
+    return _is_main_process()
+
+
+def _wait_for_server(url: str, timeout_s: float = 20.0, step_s: float = 0.25) -> bool:
+    """Wartet, bis der Flask-Server unter URL erreichbar ist."""
+    import time
+    deadline = time.time() + max(0.1, float(timeout_s))
+    while time.time() < deadline:
+        try:
+            with urlopen(url, timeout=2) as resp:
+                if 200 <= getattr(resp, "status", 200) < 500:
+                    return True
+        except URLError:
+            pass
+        except Exception:
+            pass
+        time.sleep(step_s)
+    return False
 
 
 @app.route('/')
@@ -519,12 +562,16 @@ def upload_csv():
 
 def open_browser():
     """Öffnet den Browser nach einer kurzen Verzögerung."""
-    import time
-    time.sleep(1.5)  # Warte bis Server gestartet ist
-    webbrowser.open('http://localhost:5000')
+    url = 'http://127.0.0.1:5000'
+    # In EXE/Cold-Start kann das Laden deutlich länger dauern als 1.5s.
+    if _wait_for_server(url, timeout_s=30.0):
+        webbrowser.open(url)
 
 
 if __name__ == '__main__':
+    # Wichtig für PyInstaller + multiprocessing (ProcessPool) unter Windows.
+    multiprocessing.freeze_support()
+
     print("=" * 70)
     print("TAMA-Berechnungs-Weboberfläche")
     print("=" * 70)
@@ -534,8 +581,10 @@ if __name__ == '__main__':
     print()
 
     # Starte Browser in separatem Thread
-    threading.Thread(target=open_browser, daemon=True).start()
+    if _should_open_browser():
+        threading.Thread(target=open_browser, daemon=True).start()
 
     # Debug=False für Production/EXE-Build
     is_frozen = getattr(sys, 'frozen', False)
-    app.run(debug=not is_frozen, host='0.0.0.0', port=5000)
+    # Wichtig: Reloader explizit aus, um Mehrfachstarts/Tabs zu vermeiden.
+    app.run(debug=not is_frozen, use_reloader=False, host='0.0.0.0', port=5000)
