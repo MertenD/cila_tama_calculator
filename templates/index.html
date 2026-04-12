@@ -459,6 +459,14 @@
                     </select>
                 </div>
 
+                <!-- Neu: Körpergröße anzeigen -->
+                <div class="chart-container" id="bodyHeightContainer" style="margin-top: 0; display: none;">
+                    <h3 style="margin-bottom: 10px; color: #333;">Patienten-Info</h3>
+                    <div style="font-size: 1.05em;">
+                        <strong>Körpergröße:</strong> <span id="bodyHeightValue">–</span>
+                    </div>
+                </div>
+
                 <div class="chart-container">
                     <h3 style="margin-bottom: 20px; color: #333;">TAMA-Verlauf über Zeit</h3>
                     <div class="chart-wrapper">
@@ -483,6 +491,16 @@
         let allResults = null;
         let patientData = null;
         let chart = null;
+
+        // Neu: helper um Körpergröße sauber zu formatieren
+        function formatBodyHeight(heightM) {
+            if (heightM === null || heightM === undefined || heightM === '') return null;
+            const n = Number(heightM);
+            if (!Number.isFinite(n) || n <= 0) return null;
+            // Anzeige in m und cm
+            const cm = Math.round(n * 100);
+            return `${n.toFixed(2).replace('.', ',')} m (${cm} cm)`;
+        }
 
         function showSection(sectionId) {
             document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
@@ -768,6 +786,17 @@
             const totalTimepoints = data.results.length;
             const avgTama = data.results.reduce((sum, r) => sum + r.tamaAreaVertSubtracted, 0) / totalTimepoints;
 
+            // Neu: Körpergrößen-Stats
+            const heights = data.results
+                .map(r => Number(r.bodyHeightM))
+                .filter(h => Number.isFinite(h) && h > 0);
+            const uniqueHeightPatients = new Set(
+                data.results
+                    .filter(r => Number.isFinite(Number(r.bodyHeightM)) && Number(r.bodyHeightM) > 0)
+                    .map(r => r.patId)
+            );
+            const avgHeight = heights.length ? (heights.reduce((a, b) => a + b, 0) / heights.length) : null;
+
             statsGrid.innerHTML = `
                 <div class="stat-card">
                     <div class="value">${totalPatients}</div>
@@ -781,11 +810,25 @@
                     <div class="value">${avgTama.toFixed(0)}</div>
                     <div class="label">Ø TAMA (mm²)</div>
                 </div>
+                <div class="stat-card">
+                    <div class="value">${uniqueHeightPatients.size}</div>
+                    <div class="label">Patienten mit Körpergröße</div>
+                </div>
+                <div class="stat-card">
+                    <div class="value">${avgHeight ? avgHeight.toFixed(2).replace('.', ',') : '–'}</div>
+                    <div class="label">Ø Körpergröße (m)</div>
+                </div>
             `;
         }
 
         function updateChart() {
             const patientId = document.getElementById('patientSelect').value;
+
+            // Neu: Körpergröße-UI zurücksetzen
+            const bhContainer = document.getElementById('bodyHeightContainer');
+            const bhValue = document.getElementById('bodyHeightValue');
+            bhContainer.style.display = 'none';
+            bhValue.textContent = '–';
 
             if (!patientId || !patientData[patientId]) {
                 if (chart) {
@@ -796,6 +839,14 @@
             }
 
             const data = patientData[patientId];
+
+            // Neu: Körpergröße aus (irgendeinem) Zeitpunkt lesen
+            const anyWithHeight = data.find(d => d.bodyHeightM !== null && d.bodyHeightM !== undefined && d.bodyHeightM !== '');
+            const formatted = anyWithHeight ? formatBodyHeight(anyWithHeight.bodyHeightM) : null;
+            if (formatted) {
+                bhValue.textContent = formatted;
+                bhContainer.style.display = 'block';
+            }
 
             // Sortiere nach Datum
             data.sort((a, b) => {

@@ -106,12 +106,22 @@ def run_calculation(root_path, hu_min=-29, hu_max=150):
         calculate_tama.rootPath = root_path
         calculate_tama.muscleHU = (hu_min, hu_max)
 
+        # Lade Körpergrößen-Mapping (optional)
+        patient_heights = calculate_tama.load_patient_heights()
+
         # Sende Start-Nachricht
         progress_queue.put({
             'type': 'info',
             'message': f'Starte TAMA-Berechnung... (HU: {hu_min} bis {hu_max})',
             'progress': 0
         })
+
+        if patient_heights:
+            progress_queue.put({
+                'type': 'info',
+                'message': f'Körpergrößen geladen für {len(patient_heights)} Patienten (Excel)',
+                'progress': 0
+            })
 
         results = []
         patient_dirs = []
@@ -187,7 +197,8 @@ def run_calculation(root_path, hu_min=-29, hu_max=150):
             result = calculate_tama.process_timepoint(
                 info['nrrd_path'],
                 info['patient_id'],
-                info['timepoint']
+                info['timepoint'],
+                patient_heights=patient_heights
             )
 
             if result:
@@ -209,7 +220,7 @@ def run_calculation(root_path, hu_min=-29, hu_max=150):
             output_file = "tama_areas.csv"
 
             with open(output_file, 'w', newline='', encoding='utf-8') as f:
-                fieldnames = ["patId", "timepoint", "date", "tamaAreaVertSubtracted", "tamaAreaVertNotSubtracted"]
+                fieldnames = ["patId", "timepoint", "date", "bodyHeightM", "tamaAreaVertSubtracted", "tamaAreaVertNotSubtracted"]
                 writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter=';')
                 writer.writeheader()
                 writer.writerows(results)
@@ -353,13 +364,25 @@ def upload_csv():
             try:
                 tama_vert_sub = float(row['tamaAreaVertSubtracted'])
                 tama_vert_not_sub = float(row['tamaAreaVertNotSubtracted'])
-            except (ValueError, KeyError) as e:
+            except (ValueError, KeyError):
                 continue
+
+            # bodyHeightM ist optional
+            body_height_m = None
+            raw_h = row.get('bodyHeightM', '')
+            if raw_h is not None:
+                raw_h = str(raw_h).strip()
+                if raw_h:
+                    try:
+                        body_height_m = float(raw_h.replace(',', '.'))
+                    except ValueError:
+                        body_height_m = None
 
             results.append({
                 'patId': row['patId'],
                 'timepoint': row['timepoint'],
                 'date': row.get('date', 'Unknown'),
+                'bodyHeightM': body_height_m,
                 'tamaAreaVertSubtracted': tama_vert_sub,
                 'tamaAreaVertNotSubtracted': tama_vert_not_sub
             })

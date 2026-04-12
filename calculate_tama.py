@@ -14,12 +14,173 @@ import glob
 import SimpleITK as sitk
 import numpy as np
 
+# Neu: Excel-Lesen für Körpergrößen
+from typing import Optional, Dict
+import re
+
+try:
+    import openpyxl
+except Exception:  # openpyxl ist optional, App soll auch ohne Excel laufen
+    openpyxl = None
+
 # Pfad zum Hauptordner mit den Patientendaten
 rootPath = "sources/nrrd/Sarkome_Phyton/2025-12-10"
+
+# Optional: Excel-Datei mit Patienten-Stammdaten
+DEFAULT_PATIENT_XLSX = os.path.join("sources", "NK_Doktorarbeit_Liste_1.3.xlsx")
+DEFAULT_PATIENT_SHEET = "Patienten"
+DEFAULT_PATIENT_ID_COL = "ID"
+DEFAULT_PATIENT_HEIGHT_COL = "Körpergrößen"
 
 # Hounsfield-Einheiten-Schwellenwerte: Definieren den Dichtebereich von Muskelgewebe in CT-Bildern
 # Nur Pixel mit Werten zwischen -29 und 150 werden als Muskel erkannt
 muscleHU = (-29., 150.)
+
+
+def normalize_patient_id(value) -> Optional[str]:
+    """Normalisiert Patienten-IDs für das Matching Excel <-> Ordnername.
+
+    - Entfernt alles außer Ziffern
+    - Entfernt führende Nullen
+    - Gibt eine kanonische Ziffern-String-Repräsentation zurück (ohne führende Nullen)
+
+    Beispiele:
+      "0003088882" -> "3088882"
+      3088882      -> "3088882"
+      "3088882"   -> "3088882"
+    """
+    if value is None:
+        return None
+
+    s = str(value).strip()
+    if not s:
+        return None
+
+    digits = re.sub(r"\D+", "", s)
+    if not digits:
+        return None
+
+    # int() entfernt führende Nullen robust; bei extrem langen IDs fallback auf lstrip
+    try:
+        return str(int(digits))
+    except Exception:
+        stripped = digits.lstrip('0')
+        return stripped or "0"
+
+
+def parse_height_m(value) -> Optional[float]:
+    """Parst Körpergröße zu Metern (float).
+
+    Akzeptiert z.B. "1,76", "1.76", "176", "176 cm".
+    Heuristik:
+      - Werte < 10 -> als Meter
+      - Werte >= 10 -> als Zentimeter
+    """
+    if value is None:
+        return None
+
+    s = str(value).strip()
+    if not s or s.lower() in {"n/a", "na", "nan", "none"}:
+        return None
+
+    # Entferne Einheiten/Spaces, toleriert Komma als Dezimaltrenner
+    s = s.replace(" ", "").replace("cm", "").replace("m", "")
+    s = s.replace(",", ".")
+
+    # Nur eine Zahl extrahieren
+    m = re.search(r"\d+(?:\.\d+)?", s)
+    if not m:
+        return None
+
+    try:
+        num = float(m.group(0))
+    except ValueError:
+        return None
+
+    if num <= 0:
+        return None
+
+    # Heuristik: 1.76m vs 176cm
+    if num < 10:
+        return round(num, 3)
+    return round(num / 100.0, 3)
+
+
+def load_patient_heights(
+        xlsx_path: str = DEFAULT_PATIENT_XLSX,
+        sheet_name: str = DEFAULT_PATIENT_SHEET,
+        id_col_name: str = DEFAULT_PATIENT_ID_COL,
+        height_col_name: str = DEFAULT_PATIENT_HEIGHT_COL
+) -> Dict[str, float]:
+    """Lädt Körpergrößen aus der Excel und liefert Mapping: normalized_pat_id -> height_m."""
+    if openpyxl is None:
+        return {}
+
+    if not xlsx_path or not os.path.exists(xlsx_path):
+        return {}
+
+    height_map: Dict[str, float] = {}
+
+    try:
+        wb = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
+        if sheet_name not in wb.sheetnames:
+            return {}
+
+        ws = wb[sheet_name]
+
+        # Header-Zeile finden (erste Zeile)
+        rows = ws.iter_rows(values_only=True)
+        header = next(rows, None)
+        if not header:
+            return {}
+
+        header_index = {str(h).strip(): idx for idx, h in enumerate(header) if h is not None}
+        if id_col_name not in header_index or height_col_name not in header_index:
+            return {}
+
+        id_idx = header_index[id_col_name]
+        h_idx = header_index[height_col_name]
+
+        for r in rows:
+            if not r:
+                continue
+
+            raw_id = r[id_idx] if id_idx < len(r) else None
+            raw_h = r[h_idx] if h_idx < len(r) else None
+
+            norm_id = normalize_patient_id(raw_id)
+            if not norm_id:
+                continue
+
+            height_m = parse_height_m(raw_h)
+            if height_m is None:
+                continue
+
+            height_map[norm_id] = height_m
+
+    except Exception:
+        # Excel ist optional; bei Fehlern einfach ohne Körpergrößen weiterlaufen
+        return {}
+
+    return height_map
+
+
+def pad_patient_id_like_folder(folder_patient_id: str, excel_norm_id: Optional[str]) -> Optional[str]:
+    """Padde eine normalisierte Excel-ID (ohne führende Nullen) auf die Länge des Ordnernamens.
+
+    Damit bleibt die Ausgabe-Spalte `patId` weiterhin identisch zum Ordnernamen.
+    """
+    if excel_norm_id is None:
+        return None
+
+    if not folder_patient_id:
+        return excel_norm_id
+
+    digits = re.sub(r"\D+", "", str(folder_patient_id))
+    if not digits:
+        return excel_norm_id
+
+    return str(excel_norm_id).zfill(len(digits))
 
 
 def scaleToOriginal(orgImage, segmentation):
@@ -183,7 +344,7 @@ def getAreaFromSeg(segmentation):
     return area
 
 
-def process_timepoint(nrrd_dir, patient_id, timepoint):
+def process_timepoint(nrrd_dir, patient_id, timepoint, patient_heights: Optional[Dict[str, float]] = None):
     """
     Berechnet die TAMA-Fläche für einen bestimmten Untersuchungszeitpunkt eines Patienten.
 
@@ -194,6 +355,7 @@ def process_timepoint(nrrd_dir, patient_id, timepoint):
         nrrd_dir: Pfad zum Ordner mit den Bilddaten
         patient_id: Eindeutige Nummer des Patienten
         timepoint: Zeitpunkt (z.B. "Baseline" oder "Follow-Up 1")
+        patient_heights: Optionales Mapping normalized_pat_id -> height_m
 
     Returns:
         Dictionary mit Ergebnissen oder None bei Fehler
@@ -258,10 +420,18 @@ def process_timepoint(nrrd_dir, patient_id, timepoint):
         print(f"    ✓ TAMA-Fläche: {tama_area_mm2:.0f} mm²")
         print(f"    ✓ TAMA-Fläche Vert Subtrahiert: {tama_area_mm2_vert_subtracted:.0f} mm²")
 
+        # Optional: Körpergröße aus Excel ergänzen
+        height_m = None
+        if patient_heights:
+            norm_id = normalize_patient_id(patient_id)
+            if norm_id and norm_id in patient_heights:
+                height_m = patient_heights.get(norm_id)
+
         return {
             "patId": patient_id,
             "timepoint": timepoint,
             "date": scan_date,
+            "bodyHeightM": height_m,
             "tamaAreaVertNotSubtracted": round(tama_area_mm2, 2),
             "tamaAreaVertSubtracted": round(tama_area_mm2_vert_subtracted, 2)
         }
@@ -339,6 +509,13 @@ def main():
     print(f"Gefunden: {len(patient_dirs)} Zeitpunkte für {len(set(pd['patient_id'] for pd in patient_dirs))} Patienten")
     print()
 
+    # Lade Körpergrößen-Mapping (optional)
+    patient_heights = load_patient_heights()
+    if patient_heights:
+        print(f"✓ Körpergrößen geladen für {len(patient_heights)} Patienten (aus Excel)")
+    else:
+        print("ℹ Keine Körpergrößen geladen (Excel fehlt oder nicht lesbar) — fahre ohne fort")
+
     # Verarbeite jeden gefundenen Zeitpunkt
     for i, info in enumerate(patient_dirs, 1):
         print(f"[{i}/{len(patient_dirs)}] Patient {info['patient_id']} - {info['timepoint']}")
@@ -346,7 +523,8 @@ def main():
         result = process_timepoint(
             info['nrrd_path'],
             info['patient_id'],
-            info['timepoint']
+            info['timepoint'],
+            patient_heights=patient_heights
         )
 
         if result:
@@ -359,7 +537,7 @@ def main():
         output_file = "tama_areas.csv"
 
         with open(output_file, 'w', newline='', encoding='utf-8') as f:
-            fieldnames = ["patId", "timepoint", "date", "tamaAreaVertSubtracted", "tamaAreaVertNotSubtracted"]
+            fieldnames = ["patId", "timepoint", "date", "bodyHeightM", "tamaAreaVertSubtracted", "tamaAreaVertNotSubtracted"]
             writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter=';')
             writer.writeheader()
             writer.writerows(results)

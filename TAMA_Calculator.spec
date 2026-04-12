@@ -18,8 +18,12 @@ datas = [
     ('calculate_tama.py', '.'),
 ]
 
-# Füge tama_areas.csv hinzu, falls vorhanden
+# Füge Excel-Datei hinzu, falls vorhanden
 import os
+if os.path.exists('sources/NK_Doktorarbeit_Liste_1.3.xlsx'):
+    datas.append(('sources/NK_Doktorarbeit_Liste_1.3.xlsx', 'sources'))
+
+# Füge tama_areas.csv hinzu, falls vorhanden
 if os.path.exists('tama_areas.csv'):
     datas.append(('tama_areas.csv', '.'))
 
@@ -41,6 +45,7 @@ hiddenimports = [
     'csv',
     'queue',
     'threading',
+    'openpyxl',
     'werkzeug',
     'jinja2',
     'click',

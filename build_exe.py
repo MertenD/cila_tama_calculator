@@ -29,6 +29,7 @@ args = [
     # Füge alle benötigten Dateien hinzu
     '--add-data=templates;templates',
     '--add-data=calculate_tama.py;.',
+    '--add-data=sources/NK_Doktorarbeit_Liste_1.3.xlsx;sources' if os.path.exists('sources/NK_Doktorarbeit_Liste_1.3.xlsx') else '--collect-all=flask',
     '--add-data=tama_areas.csv;.' if os.path.exists('tama_areas.csv') else '--collect-all=flask',
 
     # Hidden Imports für Flask und Abhängigkeiten
@@ -39,11 +40,13 @@ args = [
     '--hidden-import=csv',
     '--hidden-import=queue',
     '--hidden-import=threading',
+    '--hidden-import=openpyxl',
 
     # Sammle alle Flask-Pakete
     '--collect-all=flask',
     '--collect-all=flask_cors',
     '--collect-all=SimpleITK',
+    '--collect-all=openpyxl',
 
     # Optimierungen
     '--optimize=2',
