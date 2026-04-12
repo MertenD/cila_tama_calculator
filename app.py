@@ -112,6 +112,7 @@ def start_calculation():
 
     data = request.json
     root_path = data.get('path', '')
+    excel_path = data.get('excelPath', '')
     hu_min = data.get('huMin', -29)
     hu_max = data.get('huMax', 150)
 
@@ -131,14 +132,14 @@ def start_calculation():
     calculation_running = True
     calculation_results = []
 
-    thread = threading.Thread(target=run_calculation, args=(root_path, hu_min, hu_max))
+    thread = threading.Thread(target=run_calculation, args=(root_path, excel_path, hu_min, hu_max))
     thread.daemon = True
     thread.start()
 
     return jsonify({'success': True})
 
 
-def run_calculation(root_path, hu_min=-29, hu_max=150):
+def run_calculation(root_path, excel_path: str = '', hu_min=-29, hu_max=150):
     """
     Führt die TAMA-Berechnung durch und sendet Fortschrittsupdates.
     """
@@ -152,7 +153,7 @@ def run_calculation(root_path, hu_min=-29, hu_max=150):
         calculate_tama.muscleHU = (hu_min, hu_max)
 
         # Lade Patienten-Metadaten (optional): Körpergröße + Geschlecht
-        patient_metadata = calculate_tama.load_patient_metadata()
+        patient_metadata = calculate_tama.load_patient_metadata(xlsx_path=excel_path)
         patient_heights = {k: v["height_m"] for k, v in patient_metadata.items() if v.get("height_m") is not None}
 
         # Sende Start-Nachricht

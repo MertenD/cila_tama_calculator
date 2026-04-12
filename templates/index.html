@@ -346,9 +346,22 @@
                             </small>
                         </div>
 
-                        <div style="background: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #dee2e6;">
-                            <label style="font-weight: 600; color: #555; margin-bottom: 10px; display: block;">
-                                🔬 Hounsfield-Einheiten (HU) für Muskelgewebe:
+                        <!-- Neu: Excel Datei Pfad -->
+                        <div class="input-group">
+                            <label for="excelPath">Excel-Dateipfad (optional):</label>
+                            <input type="text"
+                                   id="excelPath"
+                                   placeholder="z.B. C:\Users\...\NK_Doktorarbeit_Liste_1.3.xlsx"
+                                   value="sources/NK_Doktorarbeit_Liste_1.3.xlsx"
+                                   style="margin-bottom: 10px;">
+                            <small style="color: #666; display: block; margin-top: -5px; margin-bottom: 10px;">
+                                ℹ️ Pfad zur Master Excel mit Patienten Mappe für Körpergröße und Geschlecht.
+                            </small>
+                        </div>
+
+                        <div class="input-group">
+                            <label for="huMin" style="font-size: 0.9em; color: #666; display: block; margin-bottom: 5px;">
+                                Hounsfield-Einheiten (HU) für Muskelgewebe:
                             </label>
                             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
                                 <div>
@@ -604,6 +617,7 @@
 
         async function validateAndStart() {
             const path = document.getElementById('rootPath').value.trim();
+            const excelPath = document.getElementById('excelPath').value.trim();
             const huMin = parseFloat(document.getElementById('huMin').value);
             const huMax = parseFloat(document.getElementById('huMax').value);
             const errorDiv = document.getElementById('pathError');
@@ -654,7 +668,7 @@
                 }
 
                 // Starte Berechnung
-                startCalculation(path, huMin, huMax);
+                startCalculation(path, excelPath, huMin, huMax);
 
             } catch (error) {
                 errorDiv.textContent = '❌ Fehler bei der Verbindung zum Server: ' + error.message;
@@ -735,7 +749,7 @@
             }
         }
 
-        async function startCalculation(path, huMin, huMax) {
+        async function startCalculation(path, excelPath, huMin, huMax) {
             showSection('step-calculation');
 
             try {
@@ -745,6 +759,7 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         path: path,
+                        excelPath: excelPath,
                         huMin: huMin,
                         huMax: huMax
                     })
@@ -1191,6 +1206,7 @@
             document.getElementById('progressBar').textContent = '0%';
             document.getElementById('progressText').textContent = 'Initialisiere...';
             document.getElementById('rootPath').value = 'sources/nrrd/Sarkome_Phyton/2025-12-10';
+            document.getElementById('excelPath').value = 'sources/NK_Doktorarbeit_Liste_1.3.xlsx';
             document.getElementById('huMin').value = '-29';
             document.getElementById('huMax').value = '150';
             document.getElementById('csvFile').value = '';
