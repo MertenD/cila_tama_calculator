@@ -296,6 +296,10 @@ def run_calculation(root_path, hu_min=-29, hu_max=150):
                     "tamaAreaVertNotSubtracted",
                     "smiVertSubtracted",
                     "smiVertNotSubtracted",
+                    # Neu: rechte Muskel-Teilflächen
+                    "areaQuadratusLumborumRight",
+                    "areaErectorSpinaeRight",
+                    "areaPsoasMajorRight",
                 ]
                 writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter=';')
                 writer.writeheader()
@@ -478,6 +482,10 @@ def upload_csv():
                 'tamaAreaVertNotSubtracted': tama_vert_not_sub,
                 'smiVertSubtracted': _parse_optional_float(row.get('smiVertSubtracted')),
                 'smiVertNotSubtracted': _parse_optional_float(row.get('smiVertNotSubtracted')),
+                # Neu: optionale rechte Muskel-Teilflächen
+                'areaQuadratusLumborumRight': _parse_optional_float(row.get('areaQuadratusLumborumRight')),
+                'areaErectorSpinaeRight': _parse_optional_float(row.get('areaErectorSpinaeRight')),
+                'areaPsoasMajorRight': _parse_optional_float(row.get('areaPsoasMajorRight')),
             })
 
         if not results:

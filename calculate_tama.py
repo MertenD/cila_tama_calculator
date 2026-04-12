@@ -256,6 +256,47 @@ def scaleToOriginal(orgImage, segmentation):
     return res
 
 
+# Zusatz-Segmentierungen (rechte Muskeln) – robuste Pattern (case-insensitive)
+RIGHT_MUSCLE_SEGMENT_REGEX = {
+    # Beispiele aus den Daten: "M_ quadratus lumborum rechts", "M_ erector spinae rechts", "M_ psoas major rechts"
+    "quadratusLumborumRight": re.compile(r"quadratus\s*lumborum\s*rechts", re.IGNORECASE),
+    "erectorSpinaeRight": re.compile(r"erector\s*spinae\s*rechts", re.IGNORECASE),
+    "psoasMajorRight": re.compile(r"psoas\s*major\s*rechts", re.IGNORECASE),
+}
+
+
+def find_nrrd_file_by_regex(directory: str, filename_regex: "re.Pattern") -> Optional[str]:
+    """Findet die erste .nrrd-Datei, deren Dateiname auf `filename_regex` matcht (ohne .json)."""
+    if not directory or not os.path.exists(directory):
+        return None
+
+    try:
+        files = glob.glob(os.path.join(directory, "*.nrrd"))
+    except Exception:
+        return None
+
+    files = [f for f in files if not f.endswith('.json')]
+    for f in files:
+        name = os.path.basename(f)
+        try:
+            if filename_regex.search(name):
+                return f
+        except Exception:
+            continue
+    return None
+
+
+def calculate_muscle_area_from_seg(
+        org_img: "sitk.Image",
+        seg_img: "sitk.Image",
+        dcm_thresholded: "sitk.Image",
+) -> float:
+    """Berechnet Muskel-Fläche (mm²) aus einer Segmentierung, gefiltert mit HU-Threshold."""
+    seg_scaled = scaleToOriginal(org_img, seg_img)
+    seg_filtered = sitk.And(seg_scaled, dcm_thresholded)
+    return float(getAreaFromSeg(seg_filtered))
+
+
 def find_nrrd_file(directory, pattern):
     """
     Sucht eine Datei mit einem bestimmten Textmuster im Dateinamen.
@@ -459,6 +500,11 @@ def process_timepoint(
     visc_file = find_nrrd_file(nrrd_dir, "Visc")
     vert_file = find_nrrd_file(nrrd_dir, "Vert")
 
+    # Zusätzliche rechte Muskel-Segmentierungen (optional)
+    ql_right_file = find_nrrd_file_by_regex(nrrd_dir, RIGHT_MUSCLE_SEGMENT_REGEX["quadratusLumborumRight"])
+    es_right_file = find_nrrd_file_by_regex(nrrd_dir, RIGHT_MUSCLE_SEGMENT_REGEX["erectorSpinaeRight"])
+    pm_right_file = find_nrrd_file_by_regex(nrrd_dir, RIGHT_MUSCLE_SEGMENT_REGEX["psoasMajorRight"])
+
     if not musc_file:
         print(f"    ⚠ Keine Muskel-Markierungsdatei gefunden")
         return None
@@ -474,6 +520,15 @@ def process_timepoint(
         if org_img is None:
             print(f"    ⚠ Keine CT-Bildserie gefunden")
             return None
+
+        # HU-Threshold einmal berechnen (wird für alle Muskel-Teilflächen wiederverwendet)
+        dcm_thresholded = sitk.BinaryThreshold(
+            org_img,
+            lowerThreshold=muscleHU[0],
+            upperThreshold=muscleHU[1],
+            outsideValue=0,
+            insideValue=1
+        )
 
         # Lade die Markierungen für Muskeln und Organe
         musc_img = sitk.ReadImage(musc_file, sitk.sitkUInt8)
@@ -491,12 +546,6 @@ def process_timepoint(
         # Berechne TAMA mit zusätzlicher Subtraktion der Wirbelsäule (Vert), um nur die reine Rumpfmuskulatur zu erhalten
         tama_img_vert_subtracted = sitk.And(tama_img, sitk.Not(vert_scaled))
 
-        # Filtere nach Gewebedichte: Behalte nur Bereiche, die tatsächlich Muskelgewebe sind
-        # (basierend auf den Hounsfield-Einheiten: Dichtemesswerte aus dem CT-Scan)
-        dcm_thresholded = sitk.BinaryThreshold(org_img, lowerThreshold=muscleHU[0],
-                                               upperThreshold=muscleHU[1],
-                                               outsideValue=0, insideValue=1)
-
         # Kombiniere die anatomische Markierung mit der Dichtefilterung
         # Nur Bereiche, die SOWOHL als Muskel markiert SIND als auch die richtige Dichte HABEN, bleiben übrig
         tama_filtered = sitk.And(tama_img, dcm_thresholded)
@@ -506,11 +555,36 @@ def process_timepoint(
         tama_area_mm2 = getAreaFromSeg(tama_filtered)
         tama_area_mm2_vert_subtracted = getAreaFromSeg(tama_filtered_vert_subtracted)
 
+        # Rechte Teilmuskeln (optional; fehlende Dateien -> None)
+        ql_right_area_mm2 = None
+        es_right_area_mm2 = None
+        pm_right_area_mm2 = None
+
+        def _try_area(file_path: Optional[str]) -> Optional[float]:
+            if not file_path:
+                return None
+            try:
+                seg = sitk.ReadImage(file_path, sitk.sitkUInt8)
+                return round(calculate_muscle_area_from_seg(org_img, seg, dcm_thresholded), 2)
+            except Exception as e:
+                print(f"    Warnung: Konnte Segmentierung nicht verarbeiten ({os.path.basename(file_path)}): {e}")
+                return None
+
+        ql_right_area_mm2 = _try_area(ql_right_file)
+        es_right_area_mm2 = _try_area(es_right_file)
+        pm_right_area_mm2 = _try_area(pm_right_file)
+
         # Lese das Datum des CT-Scans aus
         scan_date = get_date_from_dicom(nrrd_dir)
 
         print(f"    ✓ TAMA-Fläche: {tama_area_mm2:.0f} mm²")
         print(f"    ✓ TAMA-Fläche Vert Subtrahiert: {tama_area_mm2_vert_subtracted:.0f} mm²")
+        if ql_right_area_mm2 is not None:
+            print(f"    ✓ M. quadratus lumborum rechts: {ql_right_area_mm2:.0f} mm²")
+        if es_right_area_mm2 is not None:
+            print(f"    ✓ M. erector spinae rechts: {es_right_area_mm2:.0f} mm²")
+        if pm_right_area_mm2 is not None:
+            print(f"    ✓ M. psoas major rechts: {pm_right_area_mm2:.0f} mm²")
 
         # Optional: Körpergröße/Geschlecht aus Excel ergänzen
         height_m = None
@@ -544,6 +618,10 @@ def process_timepoint(
             "tamaAreaVertSubtracted": round(tama_area_mm2_vert_subtracted, 2),
             "smiVertNotSubtracted": smi_vert_not_sub,
             "smiVertSubtracted": smi_vert_sub,
+            # Neu: rechte Muskel-Teilflächen (mm²)
+            "areaQuadratusLumborumRight": ql_right_area_mm2,
+            "areaErectorSpinaeRight": es_right_area_mm2,
+            "areaPsoasMajorRight": pm_right_area_mm2,
         }
 
     except Exception as e:
@@ -699,6 +777,10 @@ def main():
                 "tamaAreaVertNotSubtracted",
                 "smiVertSubtracted",
                 "smiVertNotSubtracted",
+                # Neu
+                "areaQuadratusLumborumRight",
+                "areaErectorSpinaeRight",
+                "areaPsoasMajorRight",
             ]
             writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter=';')
             writer.writeheader()

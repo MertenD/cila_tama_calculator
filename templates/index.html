@@ -408,7 +408,8 @@
 
                         <div id="csvError" class="alert alert-error hidden" style="margin-top: 15px;"></div>
 
-                        <button class="btn btn-success" onclick="uploadCSV()" style="width: 100%; margin-top: 15px;">
+                        <!-- Button: Event explizit übergeben, damit uploadCSV nicht vom globalen `event` abhängt -->
+                        <button class="btn btn-success" onclick="uploadCSV(event)" style="width: 100%; margin-top: 15px;">
                             📤 CSV hochladen & anzeigen
                         </button>
                     </div>
@@ -482,9 +483,31 @@
                     </div>
                 </div>
 
-                <!-- Neu: SMI/Details pro Zeitpunkt -->
-                <div class="chart-container" id="timepointTableContainer" style="display:none;">
-                    <h3 style="margin-bottom: 15px; color: #333;">SMI & Details pro Zeitpunkt</h3>
+                <!-- Neu: ausschließlich drei zusätzliche Grafen für die neuen Größen -->
+                <div class="chart-container">
+                    <h3 style="margin-bottom: 20px; color: #333;">Verlauf – M. quadratus lumborum rechts</h3>
+                    <div class="chart-wrapper" style="height: 360px;">
+                        <canvas id="qlRightChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <h3 style="margin-bottom: 20px; color: #333;">Verlauf – M. erector spinae rechts</h3>
+                    <div class="chart-wrapper" style="height: 360px;">
+                        <canvas id="esRightChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <h3 style="margin-bottom: 20px; color: #333;">Verlauf – M. psoas major rechts</h3>
+                    <div class="chart-wrapper" style="height: 360px;">
+                        <canvas id="pmRightChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Neu: Tabelle mit wichtigen Infos für ausgewählten Patienten -->
+                <div class="chart-container" id="patientSummaryTableContainer">
+                    <h3 style="margin-bottom: 15px; color: #333;">Übersicht – ausgewählter Patient</h3>
                     <div style="overflow-x:auto;">
                         <table style="width:100%; border-collapse: collapse; background:white;">
                             <thead>
@@ -492,16 +515,19 @@
                                     <th style="padding:10px;">Zeitpunkt</th>
                                     <th style="padding:10px;">Datum</th>
                                     <th style="padding:10px;">TAMA vert-sub (mm²)</th>
-                                    <th style="padding:10px;">SMI vert-sub (cm²/m²)</th>
                                     <th style="padding:10px;">TAMA ohne vert (mm²)</th>
+                                    <th style="padding:10px;">SMI vert-sub (cm²/m²)</th>
                                     <th style="padding:10px;">SMI ohne vert (cm²/m²)</th>
+                                    <th style="padding:10px;">QL rechts (mm²)</th>
+                                    <th style="padding:10px;">ES rechts (mm²)</th>
+                                    <th style="padding:10px;">PM rechts (mm²)</th>
                                 </tr>
                             </thead>
-                            <tbody id="timepointTableBody"></tbody>
+                            <tbody id="patientSummaryTableBody"></tbody>
                         </table>
                     </div>
                     <small style="display:block; margin-top:10px; color:#666;">
-                        ℹ️ SMI = (TAMA in cm²) / (Körpergröße in m)². Wenn Körpergröße fehlt, kann SMI nicht berechnet werden.
+                        ℹ️ Fehlende Segmentierungen/Metadaten werden als „–“ angezeigt.
                     </small>
                 </div>
 
@@ -518,10 +544,16 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
     <script>
         let allResults = null;
         let patientData = null;
         let chart = null;
+
+        // Neu: drei zusätzliche Charts
+        let qlChart = null;
+        let esChart = null;
+        let pmChart = null;
 
         // Neu: helper um Körpergröße sauber zu formatieren
         function formatBodyHeight(heightM) {
@@ -632,7 +664,7 @@
             }
         }
 
-        async function uploadCSV() {
+        async function uploadCSV(evt) {
             const fileInput = document.getElementById('csvFile');
             const errorDiv = document.getElementById('csvError');
 
@@ -652,11 +684,12 @@
 
             errorDiv.classList.add('hidden');
 
-            // Zeige Ladeanimation
-            const uploadBtn = event.target;
-            const originalText = uploadBtn.textContent;
-            uploadBtn.disabled = true;
-            uploadBtn.textContent = '⏳ Lade CSV...';
+            const uploadBtn = (evt && evt.target) ? evt.target : null;
+            const originalText = uploadBtn ? uploadBtn.textContent : null;
+            if (uploadBtn) {
+                uploadBtn.disabled = true;
+                uploadBtn.textContent = '⏳ Lade CSV...';
+            }
 
             try {
                 const formData = new FormData();
@@ -672,16 +705,12 @@
                 if (!result.success) {
                     errorDiv.textContent = '❌ ' + result.error;
                     errorDiv.classList.remove('hidden');
-                    uploadBtn.disabled = false;
-                    uploadBtn.textContent = originalText;
                     return;
                 }
 
-                // Erfolgreich geladen
                 allResults = result.results;
                 patientData = result.patientData;
 
-                // Fülle Patienten-Dropdown
                 const select = document.getElementById('patientSelect');
                 select.innerHTML = '<option value="">-- Bitte Patient auswählen --</option>';
 
@@ -692,17 +721,17 @@
                     select.appendChild(option);
                 });
 
-                // Zeige Statistiken
                 updateStats(result);
-
-                // Zeige Ergebnisseite
                 showSection('step-results');
 
             } catch (error) {
                 errorDiv.textContent = '❌ Fehler beim Hochladen: ' + error.message;
                 errorDiv.classList.remove('hidden');
-                uploadBtn.disabled = false;
-                uploadBtn.textContent = originalText;
+            } finally {
+                if (uploadBtn) {
+                    uploadBtn.disabled = false;
+                    uploadBtn.textContent = originalText;
+                }
             }
         }
 
@@ -884,7 +913,7 @@
         function updateChart() {
             const patientId = document.getElementById('patientSelect').value;
 
-            // Patienteninfo-UI zurücksetzen
+            // Robust: optionale Elemente nur anfassen, wenn sie existieren
             const infoContainer = document.getElementById('patientInfoContainer');
             const bhValue = document.getElementById('bodyHeightValue');
             const sexValue = document.getElementById('sexValue');
@@ -892,74 +921,76 @@
             const tpTableContainer = document.getElementById('timepointTableContainer');
             const tpTableBody = document.getElementById('timepointTableBody');
 
-            infoContainer.style.display = 'none';
-            bhValue.textContent = '–';
-            sexValue.textContent = '–';
-            tpTableContainer.style.display = 'none';
-            tpTableBody.innerHTML = '';
+            // Neu: Patiententabelle Elemente (optional)
+            const summaryTableContainer = document.getElementById('patientSummaryTableContainer');
+            const summaryTableBody = document.getElementById('patientSummaryTableBody');
+            if (summaryTableContainer) summaryTableContainer.style.display = 'none';
+            if (summaryTableBody) summaryTableBody.innerHTML = '';
 
-            if (!patientId || !patientData[patientId]) {
-                if (chart) {
-                    chart.destroy();
-                    chart = null;
-                }
+            if (!patientId || !patientData || !patientData[patientId]) {
+                if (chart) { chart.destroy(); chart = null; }
+                if (qlChart) { qlChart.destroy(); qlChart = null; }
+                if (esChart) { esChart.destroy(); esChart = null; }
+                if (pmChart) { pmChart.destroy(); pmChart = null; }
                 return;
             }
 
             const data = patientData[patientId];
 
-            // Körpergröße/Geschlecht: patient-global (aus irgendeinem Zeitpunkt)
-            const anyWithHeight = data.find(d => d.bodyHeightM !== null && d.bodyHeightM !== undefined && d.bodyHeightM !== '');
-            const anyWithSex = data.find(d => d.sex !== null && d.sex !== undefined && String(d.sex).trim() !== '');
+            // Patienten-Info nur falls Container vorhanden
+            if (infoContainer && (bhValue || sexValue)) {
+                const anyWithHeight = data.find(d => d.bodyHeightM !== null && d.bodyHeightM !== undefined && d.bodyHeightM !== '');
+                const anyWithSex = data.find(d => d.sex !== null && d.sex !== undefined && String(d.sex).trim() !== '');
+                const formattedHeight = anyWithHeight ? formatBodyHeight(anyWithHeight.bodyHeightM) : null;
+                const formattedSex = anyWithSex ? formatSex(anyWithSex.sex) : null;
 
-            const formattedHeight = anyWithHeight ? formatBodyHeight(anyWithHeight.bodyHeightM) : null;
-            const formattedSex = anyWithSex ? formatSex(anyWithSex.sex) : null;
-
-            if (formattedHeight || formattedSex) {
-                if (formattedHeight) bhValue.textContent = formattedHeight;
-                if (formattedSex) sexValue.textContent = formattedSex;
-                infoContainer.style.display = 'block';
+                if (formattedHeight || formattedSex) {
+                    if (formattedHeight && bhValue) bhValue.textContent = formattedHeight;
+                    if (formattedSex && sexValue) sexValue.textContent = formattedSex;
+                    infoContainer.style.display = 'block';
+                }
             }
 
-            // Sortiere nach Datum
+            // Sortierung
             data.sort((a, b) => {
                 if (a.date === 'Unknown') return 1;
                 if (b.date === 'Unknown') return -1;
                 return new Date(a.date) - new Date(b.date);
             });
 
-            // Tabelle pro Zeitpunkt füllen (SMI ist zeitpunktbezogen)
-            for (const r of data) {
-                const tr = document.createElement('tr');
-                tr.style.borderBottom = '1px solid #f1f3f5';
+            // Tabelle pro Zeitpunkt nur falls existiert
+            if (tpTableBody && tpTableContainer) {
+                for (const r of data) {
+                    const tr = document.createElement('tr');
+                    tr.style.borderBottom = '1px solid #f1f3f5';
 
-                const smiSub = formatSmi(r.smiVertSubtracted) || '–';
-                const smiNot = formatSmi(r.smiVertNotSubtracted) || '–';
-                const tamaSub = (r.tamaAreaVertSubtracted !== null && r.tamaAreaVertSubtracted !== undefined) ? Number(r.tamaAreaVertSubtracted).toFixed(0) : '–';
-                const tamaNot = (r.tamaAreaVertNotSubtracted !== null && r.tamaAreaVertNotSubtracted !== undefined) ? Number(r.tamaAreaVertNotSubtracted).toFixed(0) : '–';
+                    const smiSub = formatSmi(r.smiVertSubtracted) || '–';
+                    const smiNot = formatSmi(r.smiVertNotSubtracted) || '–';
+                    const tamaSub = (r.tamaAreaVertSubtracted !== null && r.tamaAreaVertSubtracted !== undefined) ? Number(r.tamaAreaVertSubtracted).toFixed(0) : '–';
+                    const tamaNot = (r.tamaAreaVertNotSubtracted !== null && r.tamaAreaVertNotSubtracted !== undefined) ? Number(r.tamaAreaVertNotSubtracted).toFixed(0) : '–';
 
-                tr.innerHTML = `
-                    <td style="padding:10px;">${r.timepoint || '–'}</td>
-                    <td style="padding:10px;">${r.date || 'Unknown'}</td>
-                    <td style="padding:10px;">${tamaSub}</td>
-                    <td style="padding:10px;">${smiSub}</td>
-                    <td style="padding:10px;">${tamaNot}</td>
-                    <td style="padding:10px;">${smiNot}</td>
-                `;
-
-                tpTableBody.appendChild(tr);
+                    tr.innerHTML = `
+                        <td style="padding:10px;">${r.timepoint || '–'}</td>
+                        <td style="padding:10px;">${r.date || 'Unknown'}</td>
+                        <td style="padding:10px;">${tamaSub}</td>
+                        <td style="padding:10px;">${smiSub}</td>
+                        <td style="padding:10px;">${tamaNot}</td>
+                        <td style="padding:10px;">${smiNot}</td>
+                    `;
+                    tpTableBody.appendChild(tr);
+                }
+                tpTableContainer.style.display = 'block';
             }
-            tpTableContainer.style.display = 'block';
 
             const labels = data.map(d => `${d.timepoint}\n${d.date}`);
             const tamaWithVert = data.map(d => d.tamaAreaVertSubtracted);
             const tamaWithoutVert = data.map(d => d.tamaAreaVertNotSubtracted);
 
-            const ctx = document.getElementById('tamaChart').getContext('2d');
+            const tamaCanvas = document.getElementById('tamaChart');
+            if (!tamaCanvas) return;
 
-            if (chart) {
-                chart.destroy();
-            }
+            const ctx = tamaCanvas.getContext('2d');
+            if (chart) chart.destroy();
 
             chart = new Chart(ctx, {
                 type: 'line',
@@ -1066,6 +1097,83 @@
                     }
                 }
             });
+
+            // Neu: drei neue Datenreihen/Charts
+            const qlRight = data.map(d => (d.areaQuadratusLumborumRight === null || d.areaQuadratusLumborumRight === undefined || d.areaQuadratusLumborumRight === '') ? null : Number(d.areaQuadratusLumborumRight));
+            const esRight = data.map(d => (d.areaErectorSpinaeRight === null || d.areaErectorSpinaeRight === undefined || d.areaErectorSpinaeRight === '') ? null : Number(d.areaErectorSpinaeRight));
+            const pmRight = data.map(d => (d.areaPsoasMajorRight === null || d.areaPsoasMajorRight === undefined || d.areaPsoasMajorRight === '') ? null : Number(d.areaPsoasMajorRight));
+
+            function renderSingleLineChart(canvasId, existingChart, values, color) {
+                const c = document.getElementById(canvasId);
+                if (!c) return null;
+                const cctx = c.getContext('2d');
+                if (existingChart) existingChart.destroy();
+                return new Chart(cctx, {
+                    type: 'line',
+                    data: {
+                        labels,
+                        datasets: [{
+                            label: 'Fläche (mm²)',
+                            data: values,
+                            borderColor: color,
+                            backgroundColor: 'rgba(0, 0, 0, 0)',
+                            borderWidth: 3,
+                            pointRadius: 5,
+                            pointHoverRadius: 7,
+                            tension: 0.3,
+                            spanGaps: false
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            y: { title: { display: true, text: 'mm²' } },
+                            x: { title: { display: true, text: 'Zeitpunkt' } }
+                        }
+                    }
+                });
+            }
+
+            qlChart = renderSingleLineChart('qlRightChart', qlChart, qlRight, '#17a2b8');
+            esChart = renderSingleLineChart('esRightChart', esChart, esRight, '#fd7e14');
+            pmChart = renderSingleLineChart('pmRightChart', pmChart, pmRight, '#20c997');
+
+            // Neu: Übersichtstabelle für ausgewählten Patienten füllen
+            if (summaryTableBody && summaryTableContainer) {
+                const fmt0 = (v) => {
+                    if (v === null || v === undefined || v === '') return '–';
+                    const n = Number(v);
+                    if (!Number.isFinite(n)) return '–';
+                    return n.toFixed(0);
+                };
+                const fmt2 = (v) => {
+                    if (v === null || v === undefined || v === '') return '–';
+                    const n = Number(v);
+                    if (!Number.isFinite(n)) return '–';
+                    return n.toFixed(2).replace('.', ',');
+                };
+
+                for (const r of data) {
+                    const tr = document.createElement('tr');
+                    tr.style.borderBottom = '1px solid #f1f3f5';
+                    tr.innerHTML = `
+                        <td style="padding:10px;">${r.timepoint || '–'}</td>
+                        <td style="padding:10px;">${r.date || 'Unknown'}</td>
+                        <td style="padding:10px;">${fmt0(r.tamaAreaVertSubtracted)}</td>
+                        <td style="padding:10px;">${fmt0(r.tamaAreaVertNotSubtracted)}</td>
+                        <td style="padding:10px;">${fmt2(r.smiVertSubtracted)}</td>
+                        <td style="padding:10px;">${fmt2(r.smiVertNotSubtracted)}</td>
+                        <td style="padding:10px;">${fmt0(r.areaQuadratusLumborumRight)}</td>
+                        <td style="padding:10px;">${fmt0(r.areaErectorSpinaeRight)}</td>
+                        <td style="padding:10px;">${fmt0(r.areaPsoasMajorRight)}</td>
+                    `;
+                    summaryTableBody.appendChild(tr);
+                }
+
+                summaryTableContainer.style.display = 'block';
+            }
         }
 
         function downloadCSV() {
@@ -1073,12 +1181,10 @@
         }
 
         function resetApp() {
-            if (chart) {
-                chart.destroy();
-                chart = null;
-            }
-            allResults = null;
-            patientData = null;
+            if (chart) { chart.destroy(); chart = null; }
+            if (qlChart) { qlChart.destroy(); qlChart = null; }
+            if (esChart) { esChart.destroy(); esChart = null; }
+            if (pmChart) { pmChart.destroy(); pmChart = null; }
 
             document.getElementById('logContainer').innerHTML = '<div class="log-entry info">Warte auf Start...</div>';
             document.getElementById('progressBar').style.width = '0%';
