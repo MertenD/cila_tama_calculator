@@ -16,6 +16,8 @@ import json
 from datetime import datetime
 import threading
 import queue
+# Neu: Parallelisierung
+import concurrent.futures
 
 # Import der Berechnungsfunktionen aus dem vorhandenen Skript
 import calculate_tama
@@ -106,8 +108,9 @@ def run_calculation(root_path, hu_min=-29, hu_max=150):
         calculate_tama.rootPath = root_path
         calculate_tama.muscleHU = (hu_min, hu_max)
 
-        # Lade Körpergrößen-Mapping (optional)
-        patient_heights = calculate_tama.load_patient_heights()
+        # Lade Patienten-Metadaten (optional): Körpergröße + Geschlecht
+        patient_metadata = calculate_tama.load_patient_metadata()
+        patient_heights = {k: v["height_m"] for k, v in patient_metadata.items() if v.get("height_m") is not None}
 
         # Sende Start-Nachricht
         progress_queue.put({
@@ -116,10 +119,10 @@ def run_calculation(root_path, hu_min=-29, hu_max=150):
             'progress': 0
         })
 
-        if patient_heights:
+        if patient_metadata:
             progress_queue.put({
                 'type': 'info',
-                'message': f'Körpergrößen geladen für {len(patient_heights)} Patienten (Excel)',
+                'message': f'Patienten-Metadaten geladen für {len(patient_metadata)} Patienten (Excel: Größe + Geschlecht)',
                 'progress': 0
             })
 
@@ -176,51 +179,124 @@ def run_calculation(root_path, hu_min=-29, hu_max=150):
         patient_dirs.sort(key=lambda x: (x['patient_id'], x['sort_key']))
 
         total = len(patient_dirs)
+        unique_patients = len({d['patient_id'] for d in patient_dirs})
         progress_queue.put({
             'type': 'info',
-            'message': f'Gefunden: {total} Zeitpunkte für {len(set(pd["patient_id"] for pd in patient_dirs))} Patienten',
+            'message': f'Gefunden: {total} Zeitpunkte für {unique_patients} Patienten',
             'progress': 0
         })
 
-        # Verarbeite jeden Zeitpunkt
-        for i, info in enumerate(patient_dirs, 1):
-            progress_percent = int((i / total) * 100)
-
+        if total == 0:
             progress_queue.put({
-                'type': 'progress',
-                'message': f'[{i}/{total}] Patient {info["patient_id"]} - {info["timepoint"]}',
-                'progress': progress_percent,
-                'current': i,
-                'total': total
+                'type': 'error',
+                'message': 'Keine Zeitpunkte gefunden (keine nrrd-Ordner).',
+                'progress': 100
+            })
+            return
+
+        # Parallelisierung konfigurieren
+        try:
+            max_workers = int(os.environ.get('TAMA_MAX_WORKERS', '0'))
+        except ValueError:
+            max_workers = 0
+        if max_workers <= 0:
+            # konservativer Default: min(4, CPU-Count)
+            max_workers = min(4, (os.cpu_count() or 2))
+
+        # Optional: interne ITK-Threads pro Prozess drosseln (verhindert Oversubscription)
+        sitk_threads = max(1, int((os.cpu_count() or 2) / max_workers))
+
+        progress_queue.put({
+            'type': 'info',
+            'message': f'Parallelisierung aktiv: {max_workers} Prozesse (SimpleITK Threads/Prozess ~ {sitk_threads})',
+            'progress': 0
+        })
+
+        # Tasks vorbereiten
+        tasks = []
+        for info in patient_dirs:
+            tasks.append({
+                'nrrd_path': info['nrrd_path'],
+                'patient_id': info['patient_id'],
+                'timepoint': info['timepoint'],
+                'patient_heights': patient_heights,
+                'patient_metadata': patient_metadata,
+                'hu_min': hu_min,
+                'hu_max': hu_max,
+                'sitk_threads': sitk_threads,
             })
 
-            result = calculate_tama.process_timepoint(
-                info['nrrd_path'],
-                info['patient_id'],
-                info['timepoint'],
-                patient_heights=patient_heights
-            )
+        # Futures parallel ausführen und Ergebnisse einsammeln
+        completed = 0
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as ex:
+            future_map = {ex.submit(calculate_tama._process_timepoint_task, t): t for t in tasks}
 
-            if result:
-                results.append(result)
+            for fut in concurrent.futures.as_completed(future_map):
+                t = future_map[fut]
+                completed += 1
+                progress_percent = int((completed / total) * 100)
+
+                try:
+                    result = fut.result()
+                except Exception as e:
+                    progress_queue.put({
+                        'type': 'warning',
+                        'message': f"⚠ Fehler in Task {t['patient_id']} - {t['timepoint']}: {e}",
+                        'progress': progress_percent
+                    })
+                    continue
+
                 progress_queue.put({
-                    'type': 'success',
-                    'message': f'  ✓ TAMA berechnet: {result["tamaAreaVertSubtracted"]:.0f} mm²',
-                    'progress': progress_percent
+                    'type': 'progress',
+                    'message': f"[{completed}/{total}] Patient {t['patient_id']} - {t['timepoint']}",
+                    'progress': progress_percent,
+                    'current': completed,
+                    'total': total
                 })
-            else:
-                progress_queue.put({
-                    'type': 'warning',
-                    'message': f'  ⚠ Keine Ergebnisse für diesen Zeitpunkt',
-                    'progress': progress_percent
-                })
+
+                if result:
+                    results.append(result)
+                    try:
+                        tama_val = float(result.get('tamaAreaVertSubtracted'))
+                        progress_queue.put({
+                            'type': 'success',
+                            'message': f"  ✓ TAMA berechnet: {tama_val:.0f} mm²",
+                            'progress': progress_percent
+                        })
+                    except Exception:
+                        progress_queue.put({
+                            'type': 'success',
+                            'message': f"  ✓ TAMA berechnet",
+                            'progress': progress_percent
+                        })
+                else:
+                    progress_queue.put({
+                        'type': 'warning',
+                        'message': f"  ⚠ Keine Ergebnisse für {t['patient_id']} - {t['timepoint']}",
+                        'progress': progress_percent
+                    })
 
         # Speichere Ergebnisse
         if results:
+            # Stabil sortieren für CSV/Anzeige
+            def _sort_key(r):
+                return (str(r.get('patId', '')), str(r.get('timepoint', '')))
+            results.sort(key=_sort_key)
+
             output_file = "tama_areas.csv"
 
             with open(output_file, 'w', newline='', encoding='utf-8') as f:
-                fieldnames = ["patId", "timepoint", "date", "bodyHeightM", "tamaAreaVertSubtracted", "tamaAreaVertNotSubtracted"]
+                fieldnames = [
+                    "patId",
+                    "timepoint",
+                    "date",
+                    "bodyHeightM",
+                    "sex",
+                    "tamaAreaVertSubtracted",
+                    "tamaAreaVertNotSubtracted",
+                    "smiVertSubtracted",
+                    "smiVertNotSubtracted",
+                ]
                 writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter=';')
                 writer.writeheader()
                 writer.writerows(results)
@@ -356,35 +432,52 @@ def upload_csv():
         reader = csv.DictReader(lines, delimiter=';')
         results = []
 
+        def _parse_optional_float(v):
+            if v is None:
+                return None
+            s = str(v).strip()
+            if not s:
+                return None
+            try:
+                return float(s.replace(',', '.'))
+            except ValueError:
+                return None
+
+        def _parse_optional_bool(v):
+            if v is None:
+                return None
+            s = str(v).strip().lower()
+            if not s:
+                return None
+            if s in {'1', 'true', 't', 'yes', 'y', 'ja'}:
+                return True
+            if s in {'0', 'false', 'f', 'no', 'n', 'nein'}:
+                return False
+            return None
+
         for row in reader:
             if not row.get('patId'):  # Überspringe leere Zeilen
                 continue
 
-            # Konvertiere zu float
+            # Konvertiere Pflichtfelder zu float
             try:
                 tama_vert_sub = float(row['tamaAreaVertSubtracted'])
                 tama_vert_not_sub = float(row['tamaAreaVertNotSubtracted'])
             except (ValueError, KeyError):
                 continue
 
-            # bodyHeightM ist optional
-            body_height_m = None
-            raw_h = row.get('bodyHeightM', '')
-            if raw_h is not None:
-                raw_h = str(raw_h).strip()
-                if raw_h:
-                    try:
-                        body_height_m = float(raw_h.replace(',', '.'))
-                    except ValueError:
-                        body_height_m = None
+            body_height_m = _parse_optional_float(row.get('bodyHeightM'))
 
             results.append({
                 'patId': row['patId'],
-                'timepoint': row['timepoint'],
+                'timepoint': row.get('timepoint', ''),
                 'date': row.get('date', 'Unknown'),
                 'bodyHeightM': body_height_m,
+                'sex': (row.get('sex') or '').strip().upper() or None,
                 'tamaAreaVertSubtracted': tama_vert_sub,
-                'tamaAreaVertNotSubtracted': tama_vert_not_sub
+                'tamaAreaVertNotSubtracted': tama_vert_not_sub,
+                'smiVertSubtracted': _parse_optional_float(row.get('smiVertSubtracted')),
+                'smiVertNotSubtracted': _parse_optional_float(row.get('smiVertNotSubtracted')),
             })
 
         if not results:

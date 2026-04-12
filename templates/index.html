@@ -460,11 +460,19 @@
                 </div>
 
                 <!-- Neu: Körpergröße anzeigen -->
-                <div class="chart-container" id="bodyHeightContainer" style="margin-top: 0; display: none;">
+                <div class="chart-container" id="patientInfoContainer" style="margin-top: 0; display: none;">
                     <h3 style="margin-bottom: 10px; color: #333;">Patienten-Info</h3>
-                    <div style="font-size: 1.05em;">
-                        <strong>Körpergröße:</strong> <span id="bodyHeightValue">–</span>
+                    <div style="font-size: 1.05em; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 30px;">
+                        <div>
+                            <strong>Körpergröße:</strong> <span id="bodyHeightValue">–</span>
+                        </div>
+                        <div>
+                            <strong>Geschlecht:</strong> <span id="sexValue">–</span>
+                        </div>
                     </div>
+                    <small style="display:block; margin-top:10px; color:#666;">
+                        ℹ️ SMI wird pro Zeitpunkt (Baseline/Follow-Up) berechnet und unten angezeigt.
+                    </small>
                 </div>
 
                 <div class="chart-container">
@@ -472,6 +480,29 @@
                     <div class="chart-wrapper">
                         <canvas id="tamaChart"></canvas>
                     </div>
+                </div>
+
+                <!-- Neu: SMI/Details pro Zeitpunkt -->
+                <div class="chart-container" id="timepointTableContainer" style="display:none;">
+                    <h3 style="margin-bottom: 15px; color: #333;">SMI & Details pro Zeitpunkt</h3>
+                    <div style="overflow-x:auto;">
+                        <table style="width:100%; border-collapse: collapse; background:white;">
+                            <thead>
+                                <tr style="text-align:left; border-bottom:2px solid #dee2e6;">
+                                    <th style="padding:10px;">Zeitpunkt</th>
+                                    <th style="padding:10px;">Datum</th>
+                                    <th style="padding:10px;">TAMA vert-sub (mm²)</th>
+                                    <th style="padding:10px;">SMI vert-sub (cm²/m²)</th>
+                                    <th style="padding:10px;">TAMA ohne vert (mm²)</th>
+                                    <th style="padding:10px;">SMI ohne vert (cm²/m²)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="timepointTableBody"></tbody>
+                        </table>
+                    </div>
+                    <small style="display:block; margin-top:10px; color:#666;">
+                        ℹ️ SMI = (TAMA in cm²) / (Körpergröße in m)². Wenn Körpergröße fehlt, kann SMI nicht berechnet werden.
+                    </small>
                 </div>
 
                 <div style="margin-top: 30px;">
@@ -500,6 +531,24 @@
             // Anzeige in m und cm
             const cm = Math.round(n * 100);
             return `${n.toFixed(2).replace('.', ',')} m (${cm} cm)`;
+        }
+
+        // Neu: Geschlecht formatieren
+        function formatSex(sex) {
+            if (sex === null || sex === undefined) return null;
+            const s = String(sex).trim().toUpperCase();
+            if (!s) return null;
+            if (s === 'M') return 'M';
+            if (s === 'F') return 'F';
+            return s;
+        }
+
+        // Neu: SMI formatieren
+        function formatSmi(v) {
+            if (v === null || v === undefined || v === '') return null;
+            const n = Number(v);
+            if (!Number.isFinite(n)) return null;
+            return n.toFixed(2).replace('.', ',') + ' cm²/m²';
         }
 
         function showSection(sectionId) {
@@ -786,7 +835,7 @@
             const totalTimepoints = data.results.length;
             const avgTama = data.results.reduce((sum, r) => sum + r.tamaAreaVertSubtracted, 0) / totalTimepoints;
 
-            // Neu: Körpergrößen-Stats
+            // Körpergrößen-Stats
             const heights = data.results
                 .map(r => Number(r.bodyHeightM))
                 .filter(h => Number.isFinite(h) && h > 0);
@@ -796,6 +845,13 @@
                     .map(r => r.patId)
             );
             const avgHeight = heights.length ? (heights.reduce((a, b) => a + b, 0) / heights.length) : null;
+
+            // Neu: SMI-Stats
+            const uniqueSmiPatients = new Set(
+                data.results
+                    .filter(r => Number.isFinite(Number(r.smiVertSubtracted)))
+                    .map(r => r.patId)
+            );
 
             statsGrid.innerHTML = `
                 <div class="stat-card">
@@ -818,17 +874,29 @@
                     <div class="value">${avgHeight ? avgHeight.toFixed(2).replace('.', ',') : '–'}</div>
                     <div class="label">Ø Körpergröße (m)</div>
                 </div>
+                <div class="stat-card">
+                    <div class="value">${uniqueSmiPatients.size}</div>
+                    <div class="label">Patienten mit SMI</div>
+                </div>
             `;
         }
 
         function updateChart() {
             const patientId = document.getElementById('patientSelect').value;
 
-            // Neu: Körpergröße-UI zurücksetzen
-            const bhContainer = document.getElementById('bodyHeightContainer');
+            // Patienteninfo-UI zurücksetzen
+            const infoContainer = document.getElementById('patientInfoContainer');
             const bhValue = document.getElementById('bodyHeightValue');
-            bhContainer.style.display = 'none';
+            const sexValue = document.getElementById('sexValue');
+
+            const tpTableContainer = document.getElementById('timepointTableContainer');
+            const tpTableBody = document.getElementById('timepointTableBody');
+
+            infoContainer.style.display = 'none';
             bhValue.textContent = '–';
+            sexValue.textContent = '–';
+            tpTableContainer.style.display = 'none';
+            tpTableBody.innerHTML = '';
 
             if (!patientId || !patientData[patientId]) {
                 if (chart) {
@@ -840,12 +908,17 @@
 
             const data = patientData[patientId];
 
-            // Neu: Körpergröße aus (irgendeinem) Zeitpunkt lesen
+            // Körpergröße/Geschlecht: patient-global (aus irgendeinem Zeitpunkt)
             const anyWithHeight = data.find(d => d.bodyHeightM !== null && d.bodyHeightM !== undefined && d.bodyHeightM !== '');
-            const formatted = anyWithHeight ? formatBodyHeight(anyWithHeight.bodyHeightM) : null;
-            if (formatted) {
-                bhValue.textContent = formatted;
-                bhContainer.style.display = 'block';
+            const anyWithSex = data.find(d => d.sex !== null && d.sex !== undefined && String(d.sex).trim() !== '');
+
+            const formattedHeight = anyWithHeight ? formatBodyHeight(anyWithHeight.bodyHeightM) : null;
+            const formattedSex = anyWithSex ? formatSex(anyWithSex.sex) : null;
+
+            if (formattedHeight || formattedSex) {
+                if (formattedHeight) bhValue.textContent = formattedHeight;
+                if (formattedSex) sexValue.textContent = formattedSex;
+                infoContainer.style.display = 'block';
             }
 
             // Sortiere nach Datum
@@ -854,6 +927,29 @@
                 if (b.date === 'Unknown') return -1;
                 return new Date(a.date) - new Date(b.date);
             });
+
+            // Tabelle pro Zeitpunkt füllen (SMI ist zeitpunktbezogen)
+            for (const r of data) {
+                const tr = document.createElement('tr');
+                tr.style.borderBottom = '1px solid #f1f3f5';
+
+                const smiSub = formatSmi(r.smiVertSubtracted) || '–';
+                const smiNot = formatSmi(r.smiVertNotSubtracted) || '–';
+                const tamaSub = (r.tamaAreaVertSubtracted !== null && r.tamaAreaVertSubtracted !== undefined) ? Number(r.tamaAreaVertSubtracted).toFixed(0) : '–';
+                const tamaNot = (r.tamaAreaVertNotSubtracted !== null && r.tamaAreaVertNotSubtracted !== undefined) ? Number(r.tamaAreaVertNotSubtracted).toFixed(0) : '–';
+
+                tr.innerHTML = `
+                    <td style="padding:10px;">${r.timepoint || '–'}</td>
+                    <td style="padding:10px;">${r.date || 'Unknown'}</td>
+                    <td style="padding:10px;">${tamaSub}</td>
+                    <td style="padding:10px;">${smiSub}</td>
+                    <td style="padding:10px;">${tamaNot}</td>
+                    <td style="padding:10px;">${smiNot}</td>
+                `;
+
+                tpTableBody.appendChild(tr);
+            }
+            tpTableContainer.style.display = 'block';
 
             const labels = data.map(d => `${d.timepoint}\n${d.date}`);
             const tamaWithVert = data.map(d => d.tamaAreaVertSubtracted);
@@ -919,7 +1015,22 @@
                             },
                             callbacks: {
                                 label: function(context) {
-                                    return context.dataset.label + ': ' + context.parsed.y.toFixed(2) + ' mm²';
+                                    const idx = context.dataIndex;
+                                    const row = data[idx] || {};
+
+                                    const lines = [];
+                                    lines.push(context.dataset.label + ': ' + context.parsed.y.toFixed(2) + ' mm²');
+
+                                    // SMI pro Zeitpunkt (abhängig davon, welcher Datensatz hovered wird)
+                                    if (context.datasetIndex === 0) {
+                                        const smi = formatSmi(row.smiVertSubtracted);
+                                        if (smi) lines.push('SMI (vert-sub): ' + smi);
+                                    } else if (context.datasetIndex === 1) {
+                                        const smi = formatSmi(row.smiVertNotSubtracted);
+                                        if (smi) lines.push('SMI (ohne vert): ' + smi);
+                                    }
+
+                                    return lines;
                                 }
                             }
                         }

@@ -16,6 +16,8 @@ import numpy as np
 
 # Neu: Excel-Lesen für Körpergrößen
 from typing import Optional, Dict
+# Neu für Parallelisierung
+from typing import Any
 import re
 
 try:
@@ -31,10 +33,18 @@ DEFAULT_PATIENT_XLSX = os.path.join("sources", "NK_Doktorarbeit_Liste_1.3.xlsx")
 DEFAULT_PATIENT_SHEET = "Patienten"
 DEFAULT_PATIENT_ID_COL = "ID"
 DEFAULT_PATIENT_HEIGHT_COL = "Körpergrößen"
+DEFAULT_PATIENT_SEX_COL = "Geschlecht"
 
 # Hounsfield-Einheiten-Schwellenwerte: Definieren den Dichtebereich von Muskelgewebe in CT-Bildern
 # Nur Pixel mit Werten zwischen -29 und 150 werden als Muskel erkannt
 muscleHU = (-29., 150.)
+
+# SMI (Skeletal Muscle Index) Schwellenwerte in cm^2 / m^2
+# Quelle/Definition: vom Projekt vorgegeben
+SMI_THRESHOLDS_CM2_PER_M2 = {
+    "M": 55.0,
+    "F": 39.0,
+}
 
 
 def normalize_patient_id(value) -> Optional[str]:
@@ -106,20 +116,40 @@ def parse_height_m(value) -> Optional[float]:
     return round(num / 100.0, 3)
 
 
-def load_patient_heights(
+def parse_sex(value) -> Optional[str]:
+    """Parst Geschlecht aus Excel.
+
+    Erwartet typischerweise "F", "M" oder "" (leer).
+    Gibt "F"/"M" zurück oder None.
+    """
+    if value is None:
+        return None
+    s = str(value).strip().upper()
+    if not s:
+        return None
+    if s in {"F", "M"}:
+        return s
+    return None
+
+
+def load_patient_metadata(
         xlsx_path: str = DEFAULT_PATIENT_XLSX,
         sheet_name: str = DEFAULT_PATIENT_SHEET,
         id_col_name: str = DEFAULT_PATIENT_ID_COL,
-        height_col_name: str = DEFAULT_PATIENT_HEIGHT_COL
-) -> Dict[str, float]:
-    """Lädt Körpergrößen aus der Excel und liefert Mapping: normalized_pat_id -> height_m."""
+        height_col_name: str = DEFAULT_PATIENT_HEIGHT_COL,
+        sex_col_name: str = DEFAULT_PATIENT_SEX_COL,
+) -> Dict[str, dict]:
+    """Lädt Patienten-Metadaten aus Excel.
+
+    Rückgabe: Mapping normalized_pat_id -> {"height_m": Optional[float], "sex": Optional[str]}
+    """
     if openpyxl is None:
         return {}
 
     if not xlsx_path or not os.path.exists(xlsx_path):
         return {}
 
-    height_map: Dict[str, float] = {}
+    meta: Dict[str, dict] = {}
 
     try:
         wb = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
@@ -128,41 +158,63 @@ def load_patient_heights(
 
         ws = wb[sheet_name]
 
-        # Header-Zeile finden (erste Zeile)
         rows = ws.iter_rows(values_only=True)
         header = next(rows, None)
         if not header:
             return {}
 
         header_index = {str(h).strip(): idx for idx, h in enumerate(header) if h is not None}
-        if id_col_name not in header_index or height_col_name not in header_index:
+        if id_col_name not in header_index:
             return {}
 
         id_idx = header_index[id_col_name]
-        h_idx = header_index[height_col_name]
+        h_idx = header_index.get(height_col_name)
+        s_idx = header_index.get(sex_col_name)
 
         for r in rows:
             if not r:
                 continue
 
             raw_id = r[id_idx] if id_idx < len(r) else None
-            raw_h = r[h_idx] if h_idx < len(r) else None
-
             norm_id = normalize_patient_id(raw_id)
             if not norm_id:
                 continue
 
+            raw_h = r[h_idx] if (h_idx is not None and h_idx < len(r)) else None
+            raw_s = r[s_idx] if (s_idx is not None and s_idx < len(r)) else None
+
             height_m = parse_height_m(raw_h)
-            if height_m is None:
+            sex = parse_sex(raw_s)
+
+            # Wir nehmen den Eintrag auch dann mit, wenn nur eines von beidem vorhanden ist
+            if height_m is None and sex is None:
                 continue
 
-            height_map[norm_id] = height_m
+            meta[norm_id] = {"height_m": height_m, "sex": sex}
 
     except Exception:
-        # Excel ist optional; bei Fehlern einfach ohne Körpergrößen weiterlaufen
         return {}
 
-    return height_map
+    return meta
+
+
+def load_patient_heights(
+        xlsx_path: str = DEFAULT_PATIENT_XLSX,
+        sheet_name: str = DEFAULT_PATIENT_SHEET,
+        id_col_name: str = DEFAULT_PATIENT_ID_COL,
+        height_col_name: str = DEFAULT_PATIENT_HEIGHT_COL
+) -> Dict[str, float]:
+    """Lädt Körpergrößen aus der Excel und liefert Mapping: normalized_pat_id -> height_m.
+
+    (Kompatibilitäts-Wrapper; intern wird `load_patient_metadata()` genutzt.)
+    """
+    meta = load_patient_metadata(
+        xlsx_path=xlsx_path,
+        sheet_name=sheet_name,
+        id_col_name=id_col_name,
+        height_col_name=height_col_name,
+    )
+    return {k: v["height_m"] for k, v in meta.items() if v.get("height_m") is not None}
 
 
 def pad_patient_id_like_folder(folder_patient_id: str, excel_norm_id: Optional[str]) -> Optional[str]:
@@ -344,7 +396,46 @@ def getAreaFromSeg(segmentation):
     return area
 
 
-def process_timepoint(nrrd_dir, patient_id, timepoint, patient_heights: Optional[Dict[str, float]] = None):
+def calculate_smi(tama_area_mm2: Optional[float], height_m: Optional[float]) -> Optional[float]:
+    """Berechnet SMI = (TAMA_cm2) / (height_m^2).
+
+    TAMA liegt im Code in mm² vor; für SMI wird in cm² / m² gerechnet.
+    => cm² = mm² / 100
+    """
+    if tama_area_mm2 is None or height_m is None:
+        return None
+    try:
+        h = float(height_m)
+        if h <= 0:
+            return None
+        tama_cm2 = float(tama_area_mm2) / 100.0
+        return round(tama_cm2 / (h ** 2), 4)
+    except Exception:
+        return None
+
+
+def classify_muscle_wasting(sex: Optional[str], smi: Optional[float]) -> Optional[bool]:
+    """DEPRECATED: Muskelschwund-Flags werden nicht mehr ausgegeben.
+
+    (Funktion bleibt zur Abwärtskompatibilität im Code; wird nicht mehr genutzt.)
+    """
+    if smi is None:
+        return None
+    if not sex:
+        return None
+    key = str(sex).strip().upper()
+    if key not in SMI_THRESHOLDS_CM2_PER_M2:
+        return None
+    return smi < SMI_THRESHOLDS_CM2_PER_M2[key]
+
+
+def process_timepoint(
+        nrrd_dir,
+        patient_id,
+        timepoint,
+        patient_heights: Optional[Dict[str, float]] = None,
+        patient_metadata: Optional[Dict[str, dict]] = None
+):
     """
     Berechnet die TAMA-Fläche für einen bestimmten Untersuchungszeitpunkt eines Patienten.
 
@@ -355,7 +446,8 @@ def process_timepoint(nrrd_dir, patient_id, timepoint, patient_heights: Optional
         nrrd_dir: Pfad zum Ordner mit den Bilddaten
         patient_id: Eindeutige Nummer des Patienten
         timepoint: Zeitpunkt (z.B. "Baseline" oder "Follow-Up 1")
-        patient_heights: Optionales Mapping normalized_pat_id -> height_m
+        patient_heights: Optionales Mapping normalized_pat_id -> height_m (legacy)
+        patient_metadata: Optionales Mapping normalized_pat_id -> {"height_m": float|None, "sex": "F"|"M"|None}
 
     Returns:
         Dictionary mit Ergebnissen oder None bei Fehler
@@ -420,25 +512,82 @@ def process_timepoint(nrrd_dir, patient_id, timepoint, patient_heights: Optional
         print(f"    ✓ TAMA-Fläche: {tama_area_mm2:.0f} mm²")
         print(f"    ✓ TAMA-Fläche Vert Subtrahiert: {tama_area_mm2_vert_subtracted:.0f} mm²")
 
-        # Optional: Körpergröße aus Excel ergänzen
+        # Optional: Körpergröße/Geschlecht aus Excel ergänzen
         height_m = None
-        if patient_heights:
+        sex = None
+        norm_id = None
+
+        if patient_metadata:
             norm_id = normalize_patient_id(patient_id)
+            if norm_id and norm_id in patient_metadata:
+                md = patient_metadata.get(norm_id) or {}
+                height_m = md.get("height_m")
+                sex = md.get("sex")
+
+        # Fallback: nur Körpergrößen (alte API)
+        if height_m is None and patient_heights:
+            norm_id = norm_id or normalize_patient_id(patient_id)
             if norm_id and norm_id in patient_heights:
                 height_m = patient_heights.get(norm_id)
+
+        # SMI (für beide TAMA-Varianten)
+        smi_vert_not_sub = calculate_smi(tama_area_mm2, height_m)
+        smi_vert_sub = calculate_smi(tama_area_mm2_vert_subtracted, height_m)
 
         return {
             "patId": patient_id,
             "timepoint": timepoint,
             "date": scan_date,
             "bodyHeightM": height_m,
+            "sex": sex,
             "tamaAreaVertNotSubtracted": round(tama_area_mm2, 2),
-            "tamaAreaVertSubtracted": round(tama_area_mm2_vert_subtracted, 2)
+            "tamaAreaVertSubtracted": round(tama_area_mm2_vert_subtracted, 2),
+            "smiVertNotSubtracted": smi_vert_not_sub,
+            "smiVertSubtracted": smi_vert_sub,
         }
 
     except Exception as e:
         print(f"    ✗ Fehler bei Verarbeitung: {e}")
         return None
+
+
+def _process_timepoint_task(args: Dict[str, Any]) -> Optional[dict]:
+    """Worker-Wrapper für Parallelisierung (ProcessPool-friendly).
+
+    Erwartet ein Dict mit Keys:
+      - nrrd_path, patient_id, timepoint
+      - patient_metadata (optional), patient_heights (optional)
+      - hu_min, hu_max (optional)
+      - sitk_threads (optional)
+
+    Rückgabe: result-dict oder None.
+    """
+    # Oversubscription vermeiden: pro Prozess interne Threads reduzieren.
+    # SimpleITK unterstützt das je nach Build.
+    sitk_threads = args.get("sitk_threads")
+    if sitk_threads is not None:
+        try:
+            sitk.ProcessObject.SetGlobalDefaultNumberOfThreads(int(sitk_threads))
+        except Exception:
+            pass
+
+    # HU-Range pro Task setzen (globale Variable wird nur im Worker-Prozess verändert)
+    hu_min = args.get("hu_min")
+    hu_max = args.get("hu_max")
+    if hu_min is not None and hu_max is not None:
+        try:
+            global muscleHU
+            muscleHU = (float(hu_min), float(hu_max))
+        except Exception:
+            pass
+
+    return process_timepoint(
+        args["nrrd_path"],
+        args["patient_id"],
+        args["timepoint"],
+        patient_heights=args.get("patient_heights"),
+        patient_metadata=args.get("patient_metadata"),
+    )
 
 
 def main():
@@ -509,12 +658,14 @@ def main():
     print(f"Gefunden: {len(patient_dirs)} Zeitpunkte für {len(set(pd['patient_id'] for pd in patient_dirs))} Patienten")
     print()
 
-    # Lade Körpergrößen-Mapping (optional)
-    patient_heights = load_patient_heights()
-    if patient_heights:
-        print(f"✓ Körpergrößen geladen für {len(patient_heights)} Patienten (aus Excel)")
+    # Lade Körpergrößen/Geschlecht (optional)
+    patient_metadata = load_patient_metadata()
+    patient_heights = {k: v["height_m"] for k, v in patient_metadata.items() if v.get("height_m") is not None}
+
+    if patient_metadata:
+        print(f"✓ Patienten-Metadaten geladen für {len(patient_metadata)} Patienten (aus Excel)")
     else:
-        print("ℹ Keine Körpergrößen geladen (Excel fehlt oder nicht lesbar) — fahre ohne fort")
+        print("ℹ Keine Patienten-Metadaten geladen (Excel fehlt oder nicht lesbar) — fahre ohne fort")
 
     # Verarbeite jeden gefundenen Zeitpunkt
     for i, info in enumerate(patient_dirs, 1):
@@ -524,7 +675,8 @@ def main():
             info['nrrd_path'],
             info['patient_id'],
             info['timepoint'],
-            patient_heights=patient_heights
+            patient_heights=patient_heights,
+            patient_metadata=patient_metadata
         )
 
         if result:
@@ -537,7 +689,17 @@ def main():
         output_file = "tama_areas.csv"
 
         with open(output_file, 'w', newline='', encoding='utf-8') as f:
-            fieldnames = ["patId", "timepoint", "date", "bodyHeightM", "tamaAreaVertSubtracted", "tamaAreaVertNotSubtracted"]
+            fieldnames = [
+                "patId",
+                "timepoint",
+                "date",
+                "bodyHeightM",
+                "sex",
+                "tamaAreaVertSubtracted",
+                "tamaAreaVertNotSubtracted",
+                "smiVertSubtracted",
+                "smiVertNotSubtracted",
+            ]
             writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter=';')
             writer.writeheader()
             writer.writerows(results)
